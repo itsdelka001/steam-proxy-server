@@ -32,11 +32,8 @@ const defaultHeaders = {
 
 const APP_IDS = {
   'cs2': 730,
-  'cs:go': 730,
   'dota 2': 570,
-  'dota2': 570,
-  'pubg': 578080,
-  'playerunknown\'s battlegrounds': 578080
+  'pubg': 578080
 };
 
 app.get('/search', async (req, res) => {
@@ -50,72 +47,45 @@ app.get('/search', async (req, res) => {
   const appId = APP_IDS[game];
 
   if (!appId) {
-    return res.status(400).json({ 
-      error: 'Invalid game specified',
-      validGames: Object.keys(APP_IDS).join(', ')
-    });
+    return res.status(400).json({ error: 'Invalid game specified' });
   }
 
-  console.log(`[Search] - Sending request for: '${query}' in game: '${game}' (appId: ${appId})`);
+  console.log(`[Search] - Sending request to official Steam API for query: '${query}' in game: '${game}' (appId: ${appId})`);
 
   try {
     const apiUrl = `https://steamcommunity.com/market/search/render/?query=${encodeURIComponent(query)}&start=0&count=50&appid=${appId}&norender=1`;
-    console.log(`[Search] - API URL: ${apiUrl}`);
+    console.log(`[Search] - Full API URL: ${apiUrl}`);
 
     const response = await fetch(apiUrl, { headers: defaultHeaders });
     const data = await response.json();
+
+    console.log(`[Search] - Received response from Steam API:`, JSON.stringify(data, null, 2));
 
     if (data.success && data.results) {
       const items = data.results.map(item => ({
         name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
-        icon_url: item.asset_description?.icon_url 
+        icon_url: item.asset_description.icon_url
           ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
           : '',
-        float: extractFloatValue(item),
-        stickers: extractStickers(item)
+        float: item.asset_description.actions && item.asset_description.actions[0]
+          ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)
+            ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)[0]
+            : null
+          : null
       }));
-
-      console.log(`[Search] - Returned ${items.length} items`);
       res.json(items);
+      console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
     } else {
-      console.log(`[Search] - No results found`);
       res.json([]);
+      console.log(`[Search] - No results found, returning empty array.`);
     }
   } catch (error) {
-    console.error('[Search] - Error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch items',
-      details: error.message 
-    });
+    console.error('[Search] - Error fetching items from Steam API:', error);
+    res.status(500).json({ error: 'Failed to fetch items from Steam API' });
   }
 });
-
-function extractFloatValue(item) {
-  try {
-    if (item.asset_description?.actions?.[0]?.link) {
-      const floatMatch = item.asset_description.actions[0].link.match(/(\d\.\d+)/);
-      return floatMatch ? parseFloat(floatMatch[0]) : null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function extractStickers(item) {
-  try {
-    if (item.asset_description?.descriptions) {
-      return item.asset_description.descriptions
-        .filter(desc => desc.value.includes('Sticker'))
-        .map(desc => desc.value.replace('Sticker: ', '').trim());
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
 
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
@@ -128,36 +98,33 @@ app.get('/price', async (req, res) => {
   const appId = APP_IDS[game];
 
   if (!appId) {
-    return res.status(400).json({ 
-      error: 'Invalid game specified',
-      validGames: Object.keys(APP_IDS).join(', ')
-    });
+    return res.status(400).json({ error: 'Invalid game specified' });
   }
 
   try {
     const apiUrl = `https://steamcommunity.com/market/priceoverview/?appid=${appId}&currency=1&market_hash_name=${encodeURIComponent(itemName)}`;
-    console.log(`[Price] - Requesting price for: '${itemName}'`);
+    console.log(`[Price] - Sending request to official Steam API for item '${itemName}'`);
 
     const response = await fetch(apiUrl, { headers: defaultHeaders });
     const data = await response.json();
 
+    console.log(`[Price] - Received response from Steam API:`, JSON.stringify(data, null, 2));
+
     if (data.success && data.lowest_price) {
-      const price = parseFloat(data.lowest_price.replace(/[^0-9,.]/g, '').replace(',', '.'));
-      console.log(`[Price] - Price found: ${price}`);
+      const priceString = data.lowest_price;
+      const price = parseFloat(priceString.replace(/[^0-9,.]/g, '').replace(',', '.'));
       res.json({ price });
+      console.log(`[Price] - Successfully fetched price for item: ${itemName}`);
     } else {
-      console.log(`[Price] - Price not found`);
       res.status(404).json({ error: 'Price not found' });
+      console.log(`[Price] - Price not found for item: ${itemName}`);
     }
   } catch (error) {
-    console.error('[Price] - Error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch price',
-      details: error.message 
-    });
+    console.error('[Price] - Error fetching price from Steam API:', error);
+    res.status(500).json({ error: 'Failed to fetch price from Steam API' });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Proxy server running on port ${port}`);
+  console.log(`Proxy server listening at http://localhost:${port}`);
 });
