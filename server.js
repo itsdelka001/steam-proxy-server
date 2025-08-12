@@ -66,20 +66,16 @@ app.get('/search', async (req, res) => {
     const data = await response.json();
 
     if (data.success && data.results) {
-      const items = data.results.map(item => {
-        const iconUrl = item.asset_description?.icon_url 
+      const items = data.results.map(item => ({
+        name: item.name,
+        price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
+        market_hash_name: item.market_hash_name,
+        icon_url: item.asset_description?.icon_url 
           ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
-          : '';
-
-        return {
-          name: item.name,
-          price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
-          market_hash_name: item.market_hash_name,
-          icon_url: iconUrl,
-          float: extractFloatValue(item),
-          stickers: extractStickers(item)
-        };
-      });
+          : '',
+        float: extractFloatValue(item),
+        stickers: extractStickers(item)
+      }));
 
       console.log(`[Search] - Returned ${items.length} items`);
       res.json(items);
@@ -112,7 +108,7 @@ function extractStickers(item) {
   try {
     if (item.asset_description?.descriptions) {
       return item.asset_description.descriptions
-        .filter(desc => desc.value && desc.value.includes('Sticker'))
+        .filter(desc => desc.value.includes('Sticker'))
         .map(desc => desc.value.replace('Sticker: ', '').trim());
     }
     return [];
