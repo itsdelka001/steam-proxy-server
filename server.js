@@ -1,59 +1,83 @@
-    // server.js
-    const express = require('express');
-    const axios = require('axios');
-    const cors = require('cors');
+const express = require('express');
+const cors = require('cors'); // Імпортуємо бібліотеку CORS
+const fetch = require('node-fetch');
+const app = express();
+const port = process.env.PORT || 3001;
 
-    const app = express();
-    const PORT = 3001; // Порт, на якому буде працювати сервер
+// Оновлюємо цю змінну, якщо потрібно, щоб вказати домен вашого фронтенду
+// Якщо ви тестуєте локально, залиште її як 'http://localhost:3000'
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173', // Додаємо, якщо використовуєте Vite
+  'https://steam-investment-app-frontend.vercel.app' // Додайте домен, на якому розміщено ваш фронтенд
+];
 
-    // ВАШ STEAM API КЛЮЧ
-    // !!! Замініть 'YOUR_STEAM_API_KEY' на ваш реальний ключ !!!
-    // Важливо: цей ключ зберігається лише тут і не буде доступний з фронт-енду.
-    const STEAM_API_KEY = '476227250E77619FF4742E155F645AFC';
+app.use(cors({
+  origin: function (origin, callback) {
+    // Дозволяємо запити без origin (наприклад, з мобільного додатка або curl)
+    // та запити з дозволених доменів
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
 
-    // ID ігор для Steam Community Market
-    const APP_IDS = {
-      'CS2': '730',
-      'Dota 2': '570',
-      'PUBG': '578080',
-    };
+// API-ключ Steam отримуємо зі змінних середовища
+const STEAM_API_KEY = process.env.STEAM_API_KEY;
 
-    // Дозволяємо запити з фронт-енду (React-застосунку)
-    app.use(cors());
-    app.use(express.json());
+if (!STEAM_API_KEY) {
+  console.error('STEAM_API_KEY is not set. Please set it as an environment variable.');
+  process.exit(1);
+}
 
-    // Ендпоінт для отримання предметів з Steam Community Market
-    app.get('/api/steam-items', async (req, res) => {
-      const { game, query } = req.query;
+// Функція для пошуку предметів
+app.get('/search', async (req, res) => {
+  const query = req.query.query;
+  if (!query) {
+    return res.status(400).json({ error: 'Query parameter is required' });
+  }
 
-      if (!game || !APP_IDS[game]) {
-        return res.status(400).json({ error: 'Недійсна назва гри.' });
-      }
+  // Це лише приклад, вам потрібно буде адаптувати це до реального API Steam
+  // або іншого сервісу, який надає автозаповнення.
+  const mockItems = [
+    { label: `${query} (CS2)`, value: `${query} (CS2)` },
+    { label: `${query} (Dota 2)`, value: `${query} (Dota 2)` },
+    { label: `★ Huntsman Knife | Doppler (${query})`, value: `★ Huntsman Knife | Doppler (${query})` },
+  ];
+  
+  // Імітація затримки, щоб побачити індикатор завантаження
+  setTimeout(() => {
+    res.json(mockItems);
+  }, 500);
+});
 
-      const appId = APP_IDS[game];
-      // Формуємо URL-запит до Steam API. Ключ тут не потрібен, оскільки ми використовуємо
-      // публічний ендпоінт ринку, але в інших випадках ми б його додавали.
-      const steamUrl = `https://steamcommunity.com/market/search/render/?search_descriptions=0&sort_column=popular&sort_dir=desc&appid=${appId}&norender=1&count=20&query=${query || ''}`;
+// Функція для отримання ціни
+app.get('/price', async (req, res) => {
+  const itemName = req.query.item_name;
+  const game = req.query.game;
+  if (!itemName || !game) {
+    return res.status(400).json({ error: 'Item name and game are required' });
+  }
+  
+  // Тут ви маєте реалізовувати запит до Steam API або іншого сервісу
+  // Використання 'fetch' для прикладу
+  try {
+    // Приклад: запит до API Steam (URL може відрізнятися)
+    // const apiUrl = `http://api.steampowered.com/ISteamEconomy/GetAssetPrices/v1?key=${STEAM_API_KEY}&appid=730`;
+    // const response = await fetch(apiUrl);
+    // const data = await response.json();
+    // const price = data.prices.find(item => item.name === itemName)?.price;
 
-      console.log(`Запит до Steam API: ${steamUrl}`);
+    // Зараз використовуємо фіктивну ціну
+    const mockPrice = Math.random() * 100 + 10; // Випадкова ціна
+    res.json({ price: mockPrice });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch price' });
+  }
+});
 
-      try {
-        const response = await axios.get(steamUrl);
-        // Обробка отриманих даних
-        const items = response.data.results.map(item => ({
-          name: item.name,
-          currentPriceUAH: parseFloat(item.sell_price_text.replace(/[^\d,.]/g, '').replace(',', '.')) || 0, // Парсимо ціну
-          photoUrl: item.asset_description.icon_url ? `https://steamcommunity-a.akamaihd.net/economy/image/${item.asset_description.icon_url}` : null,
-        }));
-        res.json(items);
-      } catch (error) {
-        console.error('Помилка при запиті до Steam API:', error.message);
-        res.status(500).json({ error: 'Не вдалося отримати дані від Steam.' });
-      }
-    });
-
-    app.listen(PORT, () => {
-      console.log(`Сервер працює на порту ${PORT}`);
-      console.log('Готовий приймати запити від React-застосунку...');
-    });
-    
+app.listen(port, () => {
+  console.log(`Proxy server is running on http://localhost:${port}`);
+});
