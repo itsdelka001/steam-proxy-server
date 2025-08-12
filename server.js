@@ -27,9 +27,6 @@ app.use(cors({
   }
 }));
 
-// Використовуємо офіційні ендпоінти Steam, тому ключ API більше не потрібен.
-// const STEAM_API_KEY = process.env.STEAM_API_KEY;
-
 // Додаємо User-Agent для імітації браузерного запиту, щоб Steam не блокував його.
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
@@ -76,6 +73,7 @@ app.get('/search', async (req, res) => {
         name: item.name, 
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
+        // Повертаємо повний URL зображення, щоб клієнт міг його одразу використати
         icon_url: `https://community.cloudflare.steamstatic.com/economy/image/${item.icon_url}`
       }));
       res.json(items);
