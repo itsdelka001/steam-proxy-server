@@ -30,24 +30,21 @@ const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
 };
 
+const APP_IDS = {
+  'cs2': 730,
+  'dota 2': 570,
+  'pubg': 578080
+};
+
 app.get('/search', async (req, res) => {
   const query = req.query.query;
-  const game = req.query.game;
+  const game = req.query.game ? req.query.game.toLowerCase().trim() : null;
 
   if (!query) {
     return res.status(400).json({ error: 'Query is required' });
   }
 
-  let appId;
-  if (game === 'CS2') {
-    appId = 730;
-  } else if (game === 'Dota 2') {
-    appId = 570;
-  } else if (game === 'PUBG') {
-    appId = 578080;
-  } else {
-    appId = null;
-  }
+  const appId = APP_IDS[game];
 
   if (!appId) {
     return res.status(400).json({ error: 'Invalid game specified' });
@@ -69,7 +66,6 @@ app.get('/search', async (req, res) => {
         name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
-        // Тепер повертаємо порожній рядок замість null, якщо icon_url відсутній
         icon_url: item.asset_description.icon_url
           ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
           : '',
@@ -93,22 +89,13 @@ app.get('/search', async (req, res) => {
 
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
-  const game = req.query.game;
+  const game = req.query.game ? req.query.game.toLowerCase().trim() : null;
 
   if (!itemName || !game) {
     return res.status(400).json({ error: 'Item name and game are required' });
   }
 
-  let appId;
-  if (game === 'CS2') {
-    appId = 730;
-  } else if (game === 'Dota 2') {
-    appId = 570;
-  } else if (game === 'PUBG') {
-    appId = 578080;
-  } else {
-    appId = null;
-  }
+  const appId = APP_IDS[game];
 
   if (!appId) {
     return res.status(400).json({ error: 'Invalid game specified' });
