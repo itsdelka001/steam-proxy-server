@@ -4,7 +4,6 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Логуємо кожен вхідний запит
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
@@ -27,12 +26,10 @@ app.use(cors({
   }
 }));
 
-// Додаємо User-Agent для імітації браузерного запиту, щоб Steam не блокував його.
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
 };
 
-// Ендпоінт для пошуку предметів
 app.get('/search', async (req, res) => {
   const query = req.query.query;
   const game = req.query.game;
@@ -68,13 +65,14 @@ app.get('/search', async (req, res) => {
     console.log(`[Search] - Received response from Steam API:`, JSON.stringify(data, null, 2));
 
     if (data.success && data.results) {
-      // Мапуємо результати до більш чистого формату
       const items = data.results.map(item => ({
         name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
-        // *** Ось ключова зміна: ми звертаємося до item.asset_description.icon_url ***
-        icon_url: item.asset_description.icon_url ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}` : null
+        icon_url: item.asset_description.icon_url 
+          ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}` 
+          : null,
+        float: item.asset_description.actions ? item.asset_description.actions[0].value : null
       }));
       res.json(items);
       console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
@@ -88,7 +86,6 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// Ендпоінт для отримання ціни конкретного предмета
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
   const game = req.query.game;
@@ -114,8 +111,6 @@ app.get('/price', async (req, res) => {
 
   try {
     const apiUrl = `https://steamcommunity.com/market/priceoverview/?appid=${appId}&currency=1&market_hash_name=${encodeURIComponent(itemName)}`;
-
-    // Додаємо логування для відстеження відповіді від Steam API
     console.log(`[Price] - Sending request to official Steam API for item '${itemName}'`);
 
     const response = await fetch(apiUrl, { headers: defaultHeaders });
