@@ -1,21 +1,19 @@
+// server.js - Оновлений проксі-сервер з динамічним пошуком
 const express = require('express');
-const cors = require('cors'); // Імпортуємо бібліотеку CORS
+const cors = require('cors');
 const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Оновлюємо цю змінну, якщо потрібно, щоб вказати домен вашого фронтенду
-// Якщо ви тестуєте локально, залиште її як 'http://localhost:3000'
+// Оновлюємо дозволені джерела, як ми раніше обговорювали
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://steam-investment-app-frontend.vercel.app' // Додайте домен, на якому розміщено ваш фронтенд
+  'https://steam-investment-app-frontend.vercel.app'
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Дозволяємо запити без origin (наприклад, з мобільного додатка або curl)
-    // та запити з дозволених доменів
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -31,49 +29,87 @@ if (!STEAM_API_KEY) {
   process.exit(1);
 }
 
-// Функція для пошуку предметів
+// Оновлена функція для пошуку предметів на ринку Steam
 app.get('/search', async (req, res) => {
   const query = req.query.query;
+  const game = req.query.game; // Тепер ми можемо використовувати гру для фільтрації
   if (!query) {
     return res.status(400).json({ error: 'Query parameter is required' });
   }
 
-  // Це лише приклад, вам потрібно буде адаптувати це до реального API Steam
-  // або іншого сервісу, який надає автозаповнення.
-  const mockItems = [
-    { label: `${query} (CS2)`, value: `${query} (CS2)` },
-    { label: `${query} (Dota 2)`, value: `${query} (Dota 2)` },
-    { label: `★ Huntsman Knife | Doppler (${query})`, value: `★ Huntsman Knife | Doppler (${query})` },
-  ];
-  
-  // Імітація затримки, щоб побачити індикатор завантаження
-  setTimeout(() => {
-    res.json(mockItems);
-  }, 500);
+  // Отримання AppID для вибраної гри
+  let appId;
+  if (game === 'CS2') {
+    appId = 730;
+  } else if (game === 'Dota 2') {
+    appId = 570;
+  } else {
+    appId = 730; // За замовчуванням CS2
+  }
+
+  try {
+    // Використовуємо офіційний API Steam Community Market для пошуку
+    const apiUrl = `https://steamcommunity.com/market/search/render?query=${encodeURIComponent(query)}&appid=${appId}&norender=1&count=10`;
+    const response = await fetch(apiUrl);
+    const data = await response.json();
+
+    if (data.success && data.results) {
+      // Мапуємо результати API до формату, який очікує ваш фронтенд
+      const items = data.results.map(item => ({
+        label: item.market_hash_name, // Назва предмета
+        value: item.market_hash_name,
+        image: item.asset_description.icon_url, // URL-адреса фото
+        // Ви можете додати більше полів, якщо потрібно
+      }));
+      res.json(items);
+    } else {
+      res.status(404).json({ error: 'Items not found' });
+    }
+  } catch (error) {
+    console.error('Failed to fetch from Steam Market API:', error);
+    res.status(500).json({ error: 'Failed to fetch items from Steam API' });
+  }
 });
 
-// Функція для отримання ціни
+// Функція для отримання ціни - тепер використовується сторонній API для цін
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
   const game = req.query.game;
+  
   if (!itemName || !game) {
     return res.status(400).json({ error: 'Item name and game are required' });
   }
   
-  // Тут ви маєте реалізовувати запит до Steam API або іншого сервісу
-  // Використання 'fetch' для прикладу
-  try {
-    // Приклад: запит до API Steam (URL може відрізнятися)
-    // const apiUrl = `http://api.steampowered.com/ISteamEconomy/GetAssetPrices/v1?key=${STEAM_API_KEY}&appid=730`;
-    // const response = await fetch(apiUrl);
-    // const data = await response.json();
-    // const price = data.prices.find(item => item.name === itemName)?.price;
+  let appId;
+  if (game === 'CS2') {
+    appId = 730;
+  } else if (game === 'Dota 2') {
+    appId = 570;
+  } else if (game === 'PUBG') {
+    appId = 578080;
+  } else {
+    appId = null;
+  }
 
-    // Зараз використовуємо фіктивну ціну
-    const mockPrice = Math.random() * 100 + 10; // Випадкова ціна
-    res.json({ price: mockPrice });
+  if (!appId) {
+    return res.status(400).json({ error: 'Invalid game specified' });
+  }
+
+  try {
+    // Використовуємо сторонній API для отримання ціни
+    const apiUrl = `https://api.steamapi.io/market/price/${appId}/${encodeURIComponent(itemName)}?key=${STEAM_API_KEY}`;
+    const response = await fetch(apiUrl);
+    const data = await response.json();
+
+    if (data.success && data.lowest_price) {
+      const priceString = data.lowest_price;
+      const price = parseFloat(priceString.replace(/[^\d.,]/g, '').replace(',', '.'));
+      res.json({ price });
+    } else {
+      res.status(404).json({ error: 'Price not found' });
+    }
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch price' });
+    res.status(500).json({ error: 'Failed to fetch price from Steam API' });
   }
 });
 
