@@ -8,7 +8,6 @@ const port = process.env.PORT || 3001;
 // Якщо ви тестуєте локально, залиште її як 'http://localhost:3000'
 const allowedOrigins = [
   'http://localhost:3000',
-  'http://localhost:5173', // Додаємо, якщо використовуєте Vite
   'https://steam-investment-app-frontend.vercel.app' // Додайте домен, на якому розміщено ваш фронтенд
 ];
 
