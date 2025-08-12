@@ -10,13 +10,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// ====================================================================
+// [ОБНОВЛЕНО] - Додаємо новий домен Vercel до списку дозволених
+// ====================================================================
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://steam-investment-app-frontend.vercel.app'
+  'https://steam-investment-app-frontend.vercel.app',
+  // Ваш новий домен Vercel з логів
+  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app' 
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Дозволяємо запити без "origin" (наприклад, з Postman) або з дозволених доменів
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
