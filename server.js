@@ -57,11 +57,14 @@ app.get('/search', async (req, res) => {
     console.log(`[Search] - Full API URL: ${apiUrl}`);
 
     const response = await fetch(apiUrl, { headers: defaultHeaders });
-    const data = await response.json();
 
-    console.log(`[Search] - Received response from Steam API:`, JSON.stringify(data, null, 2));
+    // Додана перевірка для уникнення помилок, якщо відповідь не є JSON
+    const data = await response.json().catch(err => {
+      console.error('[Search] - Failed to parse JSON response:', err);
+      return null;
+    });
 
-    if (data.success && data.results) {
+    if (data && data.success && data.results) {
       const items = data.results.map(item => ({
         name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
@@ -79,7 +82,7 @@ app.get('/search', async (req, res) => {
       console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
     } else {
       res.json([]);
-      console.log(`[Search] - No results found, returning empty array.`);
+      console.log(`[Search] - No results found or data is invalid, returning empty array.`);
     }
   } catch (error) {
     console.error('[Search] - Error fetching items from Steam API:', error);
