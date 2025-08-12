@@ -32,6 +32,8 @@ const defaultHeaders = {
 
 const APP_IDS = {
   'cs2': 730,
+  'cs:go': 730,
+  'csgo': 730,
   'dota 2': 570,
   'pubg': 578080
 };
@@ -40,7 +42,6 @@ app.get('/search', async (req, res) => {
   const query = req.query.query;
   const game = req.query.game ? req.query.game.toLowerCase().trim() : null;
 
-  // Нове логування для перевірки отриманого параметра
   console.log(`[Search] - Received game parameter: '${game}'`);
 
   if (!query) {
@@ -49,20 +50,18 @@ app.get('/search', async (req, res) => {
 
   const appId = APP_IDS[game];
 
+  console.log(`[Search] - Resolved appId: ${appId}`);
+
   if (!appId) {
-    // Покращене логування помилки
     console.error(`[Search] - Invalid game specified: '${game}'`);
     return res.status(400).json({ error: 'Invalid game specified' });
   }
-
-  console.log(`[Search] - Sending request to official Steam API for query: '${query}' in game: '${game}' (appId: ${appId})`);
 
   try {
     const apiUrl = `https://steamcommunity.com/market/search/render/?query=${encodeURIComponent(query)}&start=0&count=50&appid=${appId}&norender=1`;
     console.log(`[Search] - Full API URL: ${apiUrl}`);
 
     const response = await fetch(apiUrl, { headers: defaultHeaders });
-
     const data = await response.json().catch(err => {
       console.error('[Search] - Failed to parse JSON response:', err);
       return null;
@@ -137,5 +136,5 @@ app.get('/price', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`Proxy server listening at http://localhost:${port}`);
+  console.log(`Proxy server listening at port ${port}`);
 });
