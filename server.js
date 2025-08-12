@@ -1,11 +1,15 @@
-// server.js - Оновлений проксі-сервер з динамічним пошуком
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Оновлюємо дозволені джерела, як ми раніше обговорювали
+// Log every incoming request
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
+  next();
+});
+
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app'
@@ -16,12 +20,12 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.log(`CORS error: Origin ${origin} not allowed`);
       callback(new Error('Not allowed by CORS'));
     }
   }
 }));
 
-// API-ключ Steam отримуємо зі змінних середовища
 const STEAM_API_KEY = process.env.STEAM_API_KEY;
 
 if (!STEAM_API_KEY) {
@@ -29,41 +33,38 @@ if (!STEAM_API_KEY) {
   process.exit(1);
 }
 
-// Оновлена функція для пошуку предметів на ринку Steam
 app.get('/search', async (req, res) => {
   const query = req.query.query;
-  const game = req.query.game; // Тепер ми можемо використовувати гру для фільтрації
+  const game = req.query.game;
   if (!query) {
     return res.status(400).json({ error: 'Query parameter is required' });
   }
 
-  // Отримання AppID для вибраної гри
   let appId;
   if (game === 'CS2') {
     appId = 730;
   } else if (game === 'Dota 2') {
     appId = 570;
   } else {
-    appId = 730; // За замовчуванням CS2
+    appId = 730;
   }
 
   try {
-    // Використовуємо офіційний API Steam Community Market для пошуку
     const apiUrl = `https://steamcommunity.com/market/search/render?query=${encodeURIComponent(query)}&appid=${appId}&norender=1&count=10`;
     const response = await fetch(apiUrl);
     const data = await response.json();
 
     if (data.success && data.results) {
-      // Мапуємо результати API до формату, який очікує ваш фронтенд
       const items = data.results.map(item => ({
-        label: item.market_hash_name, // Назва предмета
+        label: item.market_hash_name,
         value: item.market_hash_name,
-        image: item.asset_description.icon_url, // URL-адреса фото
-        // Ви можете додати більше полів, якщо потрібно
+        image: item.asset_description.icon_url,
       }));
       res.json(items);
+      console.log(`Successfully fetched ${items.length} items for query: ${query}`);
     } else {
       res.status(404).json({ error: 'Items not found' });
+      console.log(`Items not found for query: ${query}`);
     }
   } catch (error) {
     console.error('Failed to fetch from Steam Market API:', error);
@@ -71,7 +72,6 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// Функція для отримання ціни - тепер використовується сторонній API для цін
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
   const game = req.query.game;
@@ -96,7 +96,6 @@ app.get('/price', async (req, res) => {
   }
 
   try {
-    // Використовуємо сторонній API для отримання ціни
     const apiUrl = `https://api.steamapi.io/market/price/${appId}/${encodeURIComponent(itemName)}?key=${STEAM_API_KEY}`;
     const response = await fetch(apiUrl);
     const data = await response.json();
@@ -105,10 +104,13 @@ app.get('/price', async (req, res) => {
       const priceString = data.lowest_price;
       const price = parseFloat(priceString.replace(/[^\d.,]/g, '').replace(',', '.'));
       res.json({ price });
+      console.log(`Successfully fetched price for item: ${itemName}`);
     } else {
       res.status(404).json({ error: 'Price not found' });
+      console.log(`Price not found for item: ${itemName}`);
     }
   } catch (error) {
+    console.error('Failed to fetch price from Steam API:', error);
     res.status(500).json({ error: 'Failed to fetch price from Steam API' });
   }
 });
