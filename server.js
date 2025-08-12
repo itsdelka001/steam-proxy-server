@@ -69,9 +69,10 @@ app.get('/search', async (req, res) => {
         name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
+        // Повертаємо null, якщо icon_url відсутній, щоб уникнути malformed URL
         icon_url: item.asset_description.icon_url
           ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
-          : '',
+          : null,
         float: item.asset_description.actions && item.asset_description.actions[0]
           ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)
             ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)[0]
