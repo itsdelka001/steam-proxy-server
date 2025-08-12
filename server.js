@@ -69,10 +69,15 @@ app.get('/search', async (req, res) => {
         name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
-        icon_url: item.asset_description.icon_url 
-          ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}` 
-          : null,
-        float: item.asset_description.actions ? item.asset_description.actions[0].value : null
+        // Тепер повертаємо порожній рядок замість null, якщо icon_url відсутній
+        icon_url: item.asset_description.icon_url
+          ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
+          : '',
+        float: item.asset_description.actions && item.asset_description.actions[0]
+          ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)
+            ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)[0]
+            : null
+          : null
       }));
       res.json(items);
       console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
