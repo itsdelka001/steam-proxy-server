@@ -10,19 +10,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// ====================================================================
-// [ОБНОВЛЕНО] - Додаємо новий домен Vercel до списку дозволених
-// ====================================================================
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
-  // Ваш новий домен Vercel з логів
   'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app' 
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Дозволяємо запити без "origin" (наприклад, з Postman) або з дозволених доменів
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -51,14 +46,22 @@ app.get('/search', async (req, res) => {
     appId = 730;
   } else if (game === 'Dota 2') {
     appId = 570;
+  } else if (game === 'PUBG') {
+    appId = 578080;
   } else {
-    appId = 730;
+    // У випадку, якщо гра "Інша", повертаємо пустий масив,
+    // оскільки у Steam Market немає універсального appId.
+    res.json([]);
+    return;
   }
 
   try {
     const apiUrl = `https://steamcommunity.com/market/search/render?query=${encodeURIComponent(query)}&appid=${appId}&norender=1&count=10`;
     const response = await fetch(apiUrl);
     const data = await response.json();
+    
+    // Додаємо логування для відстеження відповіді від Steam API
+    console.log(`Steam API response for query '${query}' and game '${game}':`, JSON.stringify(data, null, 2));
 
     if (data.success && data.results) {
       const items = data.results.map(item => ({
@@ -105,6 +108,9 @@ app.get('/price', async (req, res) => {
     const apiUrl = `https://api.steamapi.io/market/price/${appId}/${encodeURIComponent(itemName)}?key=${STEAM_API_KEY}`;
     const response = await fetch(apiUrl);
     const data = await response.json();
+    
+    // Додаємо логування для відстеження відповіді від Steam API
+    console.log(`SteamAPI.io response for item '${itemName}':`, JSON.stringify(data, null, 2));
 
     if (data.success && data.lowest_price) {
       const priceString = data.lowest_price;
