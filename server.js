@@ -65,20 +65,25 @@ app.get('/search', async (req, res) => {
     });
 
     if (data && data.success && data.results) {
-      const items = data.results.map(item => ({
-        name: item.name,
-        price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
-        market_hash_name: item.market_hash_name,
-        // Повертаємо null, якщо icon_url відсутній, щоб уникнути malformed URL
-        icon_url: item.asset_description.icon_url
-          ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
-          : null,
-        float: item.asset_description.actions && item.asset_description.actions[0]
-          ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)
-            ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)[0]
+      const items = data.results.map(item => {
+        // Додано логування тут
+        console.log(`[Search] - Processing item: ${item.name}, icon_url from API: ${item.asset_description.icon_url}`);
+
+        return {
+          name: item.name,
+          price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
+          market_hash_name: item.market_hash_name,
+          // Повертаємо null, якщо icon_url відсутній, щоб уникнути malformed URL
+          icon_url: item.asset_description.icon_url
+            ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
+            : null,
+          float: item.asset_description.actions && item.asset_description.actions[0]
+            ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)
+              ? item.asset_description.actions[0].link.match(/(\d\.\d+)/)[0]
+              : null
             : null
-          : null
-      }));
+        };
+      });
       res.json(items);
       console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
     } else {
