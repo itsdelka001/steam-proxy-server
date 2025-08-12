@@ -13,7 +13,7 @@ app.use((req, res, next) => {
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
-  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app' 
+  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app'
 ];
 
 app.use(cors({
@@ -69,12 +69,12 @@ app.get('/search', async (req, res) => {
 
     if (data.success && data.results) {
       // Мапуємо результати до більш чистого формату
-      const items = data.results.map(item => ({ 
-        name: item.name, 
+      const items = data.results.map(item => ({
+        name: item.name,
         price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
         market_hash_name: item.market_hash_name,
-        // Повертаємо повний URL зображення, щоб клієнт міг його одразу використати
-        icon_url: `https://community.cloudflare.steamstatic.com/economy/image/${item.icon_url}`
+        // *** Ось ключова зміна: ми звертаємося до item.asset_description.icon_url ***
+        icon_url: item.asset_description.icon_url ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}` : null
       }));
       res.json(items);
       console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
@@ -92,11 +92,11 @@ app.get('/search', async (req, res) => {
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
   const game = req.query.game;
-  
+
   if (!itemName || !game) {
     return res.status(400).json({ error: 'Item name and game are required' });
   }
-  
+
   let appId;
   if (game === 'CS2') {
     appId = 730;
@@ -114,7 +114,7 @@ app.get('/price', async (req, res) => {
 
   try {
     const apiUrl = `https://steamcommunity.com/market/priceoverview/?appid=${appId}&currency=1&market_hash_name=${encodeURIComponent(itemName)}`;
-    
+
     // Додаємо логування для відстеження відповіді від Steam API
     console.log(`[Price] - Sending request to official Steam API for item '${itemName}'`);
 
