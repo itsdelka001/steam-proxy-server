@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Log every incoming request
+// Логуємо кожен вхідний запит
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
@@ -27,16 +27,19 @@ app.use(cors({
   }
 }));
 
-const STEAM_API_KEY = process.env.STEAM_API_KEY;
+// Використовуємо офіційні ендпоінти Steam, тому ключ API більше не потрібен.
+// const STEAM_API_KEY = process.env.STEAM_API_KEY;
 
-if (!STEAM_API_KEY) {
-  console.error('STEAM_API_KEY is not set. Please set it as an environment variable.');
-  process.exit(1);
-}
+// Додаємо User-Agent для імітації браузерного запиту, щоб Steam не блокував його.
+const defaultHeaders = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+};
 
+// Ендпоінт для пошуку предметів
 app.get('/search', async (req, res) => {
   const query = req.query.query;
   const game = req.query.game;
+
   if (!query) {
     return res.status(400).json({ error: 'Query is required' });
   }
@@ -56,35 +59,38 @@ app.get('/search', async (req, res) => {
     return res.status(400).json({ error: 'Invalid game specified' });
   }
 
-  // Add logging for the request being made to the Steam API
-  console.log(`[Search] - Sending request to Steam API for query: '${query}' in game: '${game}' (appId: ${appId})`);
+  console.log(`[Search] - Sending request to official Steam API for query: '${query}' in game: '${game}' (appId: ${appId})`);
 
   try {
-    const apiUrl = `https://api.steamapi.io/market/search/v1?api_key=${STEAM_API_KEY}&app_id=${appId}&search_term=${encodeURIComponent(query)}`;
-    
-    // Add logging to show the full URL
+    const apiUrl = `https://steamcommunity.com/market/search/render/?query=${encodeURIComponent(query)}&start=0&count=50&appid=${appId}&norender=1`;
     console.log(`[Search] - Full API URL: ${apiUrl}`);
 
-    const response = await fetch(apiUrl);
+    const response = await fetch(apiUrl, { headers: defaultHeaders });
     const data = await response.json();
-    
-    // Add logging to show the full response from the Steam API
+
     console.log(`[Search] - Received response from Steam API:`, JSON.stringify(data, null, 2));
 
     if (data.success && data.results) {
-      const items = data.results.map(item => ({ name: item.name, price: item.price }));
+      // Мапуємо результати до більш чистого формату
+      const items = data.results.map(item => ({ 
+        name: item.name, 
+        price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')),
+        market_hash_name: item.market_hash_name,
+        icon_url: `https://community.cloudflare.steamstatic.com/economy/image/${item.icon_url}`
+      }));
       res.json(items);
       console.log(`[Search] - Successfully processed and returned ${items.length} items.`);
     } else {
-      res.json([]); // Return an empty array if no results are found
+      res.json([]);
       console.log(`[Search] - No results found, returning empty array.`);
     }
   } catch (error) {
-    console.error('Error fetching items from Steam API:', error);
+    console.error('[Search] - Error fetching items from Steam API:', error);
     res.status(500).json({ error: 'Failed to fetch items from Steam API' });
   }
 });
 
+// Ендпоінт для отримання ціни конкретного предмета
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
   const game = req.query.game;
@@ -109,16 +115,19 @@ app.get('/price', async (req, res) => {
   }
 
   try {
-    const apiUrl = `https://api.steamapi.io/market/price/${appId}/${encodeURIComponent(itemName)}?key=${STEAM_API_KEY}`;
-    const response = await fetch(apiUrl);
+    const apiUrl = `https://steamcommunity.com/market/priceoverview/?appid=${appId}&currency=1&market_hash_name=${encodeURIComponent(itemName)}`;
+    
+    // Додаємо логування для відстеження відповіді від Steam API
+    console.log(`[Price] - Sending request to official Steam API for item '${itemName}'`);
+
+    const response = await fetch(apiUrl, { headers: defaultHeaders });
     const data = await response.json();
 
-    // Додаємо логування для відстеження відповіді від Steam API
-    console.log(`[Price] - SteamAPI.io response for item '${itemName}':`, JSON.stringify(data, null, 2));
+    console.log(`[Price] - Received response from Steam API:`, JSON.stringify(data, null, 2));
 
     if (data.success && data.lowest_price) {
       const priceString = data.lowest_price;
-      const price = parseFloat(priceString.replace(/[^\\d.,]/g, '').replace(',', '.'));
+      const price = parseFloat(priceString.replace(/[^0-9,.]/g, '').replace(',', '.'));
       res.json({ price });
       console.log(`[Price] - Successfully fetched price for item: ${itemName}`);
     } else {
@@ -126,7 +135,7 @@ app.get('/price', async (req, res) => {
       console.log(`[Price] - Price not found for item: ${itemName}`);
     }
   } catch (error) {
-    console.error('Error fetching price from Steam API:', error);
+    console.error('[Price] - Error fetching price from Steam API:', error);
     res.status(500).json({ error: 'Failed to fetch price from Steam API' });
   }
 });
