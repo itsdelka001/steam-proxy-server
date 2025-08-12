@@ -4,16 +4,18 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Логуємо кожен вхідний запит
+// Логуємо кожен вхідний запит, що надходить на сервер
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
 });
 
+// Дозволені джерела (домени), з яких можуть надходити запити.
+// Це важливо для безпеки та запобігання помилкам CORS.
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
-  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app' 
+  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app'
 ];
 
 app.use(cors({
@@ -26,9 +28,6 @@ app.use(cors({
     }
   }
 }));
-
-// Використовуємо офіційні ендпоінти Steam, тому ключ API більше не потрібен.
-// const STEAM_API_KEY = process.env.STEAM_API_KEY;
 
 // Додаємо User-Agent для імітації браузерного запиту, щоб Steam не блокував його.
 const defaultHeaders = {
