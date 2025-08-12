@@ -5,13 +5,13 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Логування вхідних запитів
+// Логи запитів
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
 });
 
-// Дозволені origin для CORS
+// Дозволені домени для CORS
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
@@ -19,7 +19,7 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
+  origin: function(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -29,19 +29,19 @@ app.use(cors({
   }
 }));
 
-// Заголовок User-Agent для API Steam
+// Заголовки для запитів до Steam
 const defaultHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
 };
 
-// ID ігор для API Steam
+// AppID для ігор
 const APP_IDS = {
   'cs2': 730,
   'dota 2': 570,
   'pubg': 578080
 };
 
-// Ендпоінт пошуку предметів
+// Пошук предметів
 app.get('/search', async (req, res) => {
   const query = req.query.query;
   const game = req.query.game ? req.query.game.toLowerCase().trim() : null;
@@ -57,51 +57,50 @@ app.get('/search', async (req, res) => {
 
   try {
     const apiUrl = `https://steamcommunity.com/market/search/render/?query=${encodeURIComponent(query)}&start=0&count=50&appid=${appId}&norender=1`;
-    console.log(`[Search] Request to Steam API: ${apiUrl}`);
-
     const response = await fetch(apiUrl, { headers: defaultHeaders });
-    const data = await response.json().catch(err => {
-      console.error('[Search] Failed to parse JSON:', err);
-      return null;
-    });
+    const data = await response.json();
 
-    if (data && data.success && data.results) {
+    if (data && data.success && Array.isArray(data.results)) {
       const items = data.results.map(item => {
-        const iconUrl = item.asset_description?.icon_url
-          ? `https://community.cloudflare.steamstatic.com/economy/image/${item.asset_description.icon_url}`
+        // Перевіряємо, чи є asset_description та icon_url
+        const iconUrlPath = item.asset_description && item.asset_description.icon_url
+          ? item.asset_description.icon_url
           : null;
 
+        // Обробка float (якщо є)
         let floatValue = null;
-        if (item.asset_description?.actions?.[0]?.link) {
+        if (
+          item.asset_description &&
+          item.asset_description.actions &&
+          Array.isArray(item.asset_description.actions) &&
+          item.asset_description.actions.length > 0
+        ) {
           const match = item.asset_description.actions[0].link.match(/(\d\.\d+)/);
           floatValue = match ? match[0] : null;
         }
 
-        const priceString = item.sell_price_text || '';
-        const price = parseFloat(priceString.replace(/[^0-9,.]/g, '').replace(',', '.')) || 0;
-
         return {
           name: item.name,
-          price,
+          price: parseFloat(item.sell_price_text.replace(/[^0-9,.]/g, '').replace(',', '.')) || null,
           market_hash_name: item.market_hash_name,
-          icon_url: iconUrl,
+          icon_url: iconUrlPath
+            ? `https://community.cloudflare.steamstatic.com/economy/image/${iconUrlPath}`
+            : null,  // Якщо немає картинки — повертати null
           float: floatValue
         };
       });
 
-      console.log(`[Search] Found ${items.length} items`);
       return res.json(items);
     } else {
-      console.log('[Search] No results or invalid data, returning empty array');
       return res.json([]);
     }
   } catch (error) {
-    console.error('[Search] Error fetching from Steam API:', error);
+    console.error('[Search] Error:', error);
     return res.status(500).json({ error: 'Failed to fetch items from Steam API' });
   }
 });
 
-// Ендпоінт отримання ціни предмета
+// Отримання ціни предмета
 app.get('/price', async (req, res) => {
   const itemName = req.query.item_name;
   const game = req.query.game ? req.query.game.toLowerCase().trim() : null;
@@ -117,21 +116,17 @@ app.get('/price', async (req, res) => {
 
   try {
     const apiUrl = `https://steamcommunity.com/market/priceoverview/?appid=${appId}&currency=1&market_hash_name=${encodeURIComponent(itemName)}`;
-    console.log(`[Price] Request price for item: ${itemName}`);
-
     const response = await fetch(apiUrl, { headers: defaultHeaders });
     const data = await response.json();
 
     if (data.success && data.lowest_price) {
-      const price = parseFloat(data.lowest_price.replace(/[^0-9,.]/g, '').replace(',', '.')) || 0;
-      console.log(`[Price] Price found: ${price}`);
+      const price = parseFloat(data.lowest_price.replace(/[^0-9,.]/g, '').replace(',', '.')) || null;
       return res.json({ price });
     } else {
-      console.log(`[Price] Price not found for item: ${itemName}`);
       return res.status(404).json({ error: 'Price not found' });
     }
   } catch (error) {
-    console.error('[Price] Error fetching price:', error);
+    console.error('[Price] Error:', error);
     return res.status(500).json({ error: 'Failed to fetch price from Steam API' });
   }
 });
