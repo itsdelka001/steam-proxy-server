@@ -9,7 +9,7 @@
     // ВАШ STEAM API КЛЮЧ
     // !!! Замініть 'YOUR_STEAM_API_KEY' на ваш реальний ключ !!!
     // Важливо: цей ключ зберігається лише тут і не буде доступний з фронт-енду.
-    const STEAM_API_KEY = '476227250E77619FF4742E155F645AFC';
+    const STEAM_API_KEY = process.env.STEAM_API_KEY;
 
     // ID ігор для Steam Community Market
     const APP_IDS = {
