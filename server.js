@@ -235,32 +235,48 @@ app.get('/price_history', async (req, res) => {
     return res.status(400).json({ error: 'Invalid game specified' });
   }
   
-  // URL для запиту історії ціни на Steam API
   const url = `https://steamcommunity.com/market/pricehistory/?currency=3&appid=${appId}&market_hash_name=${encodeURIComponent(item_name)}`;
   
-  // ---> ЛОГУВАННЯ: Відправка запиту на історію ціни
   console.log(`[LOG] Відправка запиту на історію ціни Steam: ${url}`);
 
   try {
     const response = await fetch(url, { headers: defaultHeaders });
 
-    // ---> ЛОГУВАННЯ: Статус відповіді
     console.log(`[LOG] Відповідь від Steam Price History API, статус: ${response.status}`);
 
     if (response.status === 429) {
       console.error(`[ERROR] Steam API Rate Limit Exceeded: забагато запитів!`);
       return res.status(429).json({ success: false, error: 'Too Many Requests to Steam API' });
     }
+    
+    // Додаємо перевірку на статус 400 Bad Request
+    if (response.status === 400) {
+      console.error(`[ERROR] Steam API повернув помилку 400 Bad Request. Можливо, для цього предмета немає історії цін.`);
+      return res.status(400).json({ success: false, error: 'Bad request to Steam API, check item name or if price history exists' });
+    }
+    
+    // Перевірка, чи є відповідь успішною, інакше обробляємо як помилку
+    if (!response.ok) {
+        console.error(`[ERROR] Помилка HTTP від Steam API зі статусом: ${response.status}`);
+        return res.status(response.status).json({ success: false, error: `HTTP Error from Steam: ${response.status}` });
+    }
 
-    const data = await response.json();
+    // Спробуємо отримати JSON, якщо не вдається - обробляємо виняток
+    const textData = await response.text();
+    let data;
+    try {
+        // Усуваємо потенційну BOM-позначку
+        data = JSON.parse(textData.trim().replace(/^\ufeff/,""));
+    } catch (e) {
+        console.error(`[ERROR] Неможливо розпарсити JSON-відповідь. Отримано:`, textData.substring(0, 100) + '...');
+        return res.status(500).json({ success: false, error: 'Invalid JSON response from Steam API' });
+    }
 
     if (!data.success) {
-      // ---> ЛОГУВАННЯ: Помилка Steam API
       console.error(`[ERROR] Steam API повернув помилку історії ціни:`, data);
       return res.status(500).json({ success: false, error: 'Steam API error', steamData: data });
     }
 
-    // Перевірка, що дані про ціни існують
     if (!data.prices) {
         console.warn(`[WARNING] Steam API повернув успішну відповідь, але без даних про ціни.`);
         return res.json({ success: true, prices: [] });
@@ -268,7 +284,6 @@ app.get('/price_history', async (req, res) => {
 
     res.json(data);
   } catch (error) {
-    // ---> ЛОГУВАННЯ: Виняток під час запиту
     console.error('Error fetching price history from Steam:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch price history from Steam' });
   }
