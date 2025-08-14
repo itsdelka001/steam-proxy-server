@@ -223,6 +223,57 @@ app.get('/current_price', async (req, res) => {
   }
 });
 
+// ---> НОВИЙ МАРШРУТ для історії ціни
+app.get('/price_history', async (req, res) => {
+  const { item_name, game } = req.query;
+  if (!item_name || !game) {
+    return res.status(400).json({ error: 'item_name and game are required' });
+  }
+
+  const appId = APP_IDS[game.toLowerCase()];
+  if (!appId) {
+    return res.status(400).json({ error: 'Invalid game specified' });
+  }
+  
+  // URL для запиту історії ціни на Steam API
+  const url = `https://steamcommunity.com/market/pricehistory/?currency=3&appid=${appId}&market_hash_name=${encodeURIComponent(item_name)}`;
+  
+  // ---> ЛОГУВАННЯ: Відправка запиту на історію ціни
+  console.log(`[LOG] Відправка запиту на історію ціни Steam: ${url}`);
+
+  try {
+    const response = await fetch(url, { headers: defaultHeaders });
+
+    // ---> ЛОГУВАННЯ: Статус відповіді
+    console.log(`[LOG] Відповідь від Steam Price History API, статус: ${response.status}`);
+
+    if (response.status === 429) {
+      console.error(`[ERROR] Steam API Rate Limit Exceeded: забагато запитів!`);
+      return res.status(429).json({ success: false, error: 'Too Many Requests to Steam API' });
+    }
+
+    const data = await response.json();
+
+    if (!data.success) {
+      // ---> ЛОГУВАННЯ: Помилка Steam API
+      console.error(`[ERROR] Steam API повернув помилку історії ціни:`, data);
+      return res.status(500).json({ success: false, error: 'Steam API error', steamData: data });
+    }
+
+    // Перевірка, що дані про ціни існують
+    if (!data.prices) {
+        console.warn(`[WARNING] Steam API повернув успішну відповідь, але без даних про ціни.`);
+        return res.json({ success: true, prices: [] });
+    }
+
+    res.json(data);
+  } catch (error) {
+    // ---> ЛОГУВАННЯ: Виняток під час запиту
+    console.error('Error fetching price history from Steam:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch price history from Steam' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Proxy server listening at port ${port}`);
 });
