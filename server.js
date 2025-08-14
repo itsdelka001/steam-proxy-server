@@ -1,13 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const admin = require('firebase-admin'); // ✨ НОВЕ: імпорт Firebase Admin SDK
+const admin = require('firebase-admin');
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-// ✨ НОВЕ: Ініціалізація Firebase Admin SDK
-// Використовуємо змінну середовища для безпечного зберігання ключа
 let serviceAccount;
 try {
   serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
@@ -18,21 +16,21 @@ try {
 } catch (error) {
   console.error("Error initializing Firebase Admin SDK:", error.message);
   console.error("Please ensure the FIREBASE_ADMIN_CREDENTIALS environment variable is set correctly.");
-  // Можна залишити сервер працювати для проксі, якщо Firebase не є критичним
 }
 
 const db = admin.firestore();
-// ✨ КІНЕЦЬ НОВОГО БЛОКУ
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
 });
 
+// ✨ ВИПРАВЛЕНО: Додано нове посилання Vercel до дозволених джерел
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
-  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app'
+  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app',
+  'https://steam-investment-app-frontend-lx11k97df-itsdelka001s-projects.vercel.app' 
 ];
 
 app.use(cors({
@@ -67,8 +65,6 @@ function buildImageUrl(iconUrl) {
   return cdnHosts[0] + iconUrl;
 }
 
-// ✨ НОВІ API маршрути для роботи з Firestore
-// Отримання всіх інвестицій
 app.get('/api/investments', async (req, res) => {
   try {
     const investmentsRef = db.collection('investments');
@@ -84,7 +80,6 @@ app.get('/api/investments', async (req, res) => {
   }
 });
 
-// Додавання нової інвестиції
 app.post('/api/investments', async (req, res) => {
   try {
     const newItem = req.body;
@@ -96,7 +91,6 @@ app.post('/api/investments', async (req, res) => {
   }
 });
 
-// Оновлення інвестиції за ID
 app.put('/api/investments/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -110,7 +104,6 @@ app.put('/api/investments/:id', async (req, res) => {
   }
 });
 
-// Видалення інвестиції за ID
 app.delete('/api/investments/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -123,9 +116,6 @@ app.delete('/api/investments/:id', async (req, res) => {
   }
 });
 
-// ✨ КІНЕЦЬ НОВОГО БЛОКУ
-
-// ✨ ТВОЇ ІСНУЮЧІ API маршрути для Steam Market
 app.get('/search', async (req, res) => {
   const { query, game } = req.query;
   if (!query || !game) {
