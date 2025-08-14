@@ -6,6 +6,7 @@ const admin = require('firebase-admin');
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Ініціалізація Firebase Admin SDK
 let serviceAccount;
 try {
   serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
@@ -20,28 +21,46 @@ try {
 
 const db = admin.firestore();
 
+// Логування запитів
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
 });
 
-// ✨ ВИПРАВЛЕНО: Додано нове посилання Vercel до дозволених джерел
+// Налаштування CORS
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
-  'https://steam-investment-app-frontend-l7d916yuv-itsdelka001s-projects.vercel.app',
-  'https://steam-investment-app-frontend-lx11k97df-itsdelka001s-projects.vercel.app' 
+  // Регулярний вираз для всіх preview-доменів Vercel
+  /^https:\/\/steam-investment-app-frontend-[a-z0-9]+-itsdelka001s-projects\.vercel\.app$/
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) {
+      // Дозволити запити без Origin (наприклад, від Postman)
+      callback(null, true);
+      return;
+    }
+
+    // Перевірити, чи origin відповідає дозволеним шаблонам
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed;
+      } else if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return false;
+    });
+
+    if (isAllowed) {
       callback(null, true);
     } else {
       console.log(`CORS error: Origin ${origin} not allowed`);
       callback(new Error('Not allowed by CORS'));
     }
-  }
+  },
+  credentials: true
 }));
 
 app.use(express.json());
@@ -65,6 +84,7 @@ function buildImageUrl(iconUrl) {
   return cdnHosts[0] + iconUrl;
 }
 
+// API для інвестицій
 app.get('/api/investments', async (req, res) => {
   try {
     const investmentsRef = db.collection('investments');
@@ -116,6 +136,7 @@ app.delete('/api/investments/:id', async (req, res) => {
   }
 });
 
+// Steam API Proxy
 app.get('/search', async (req, res) => {
   const { query, game } = req.query;
   if (!query || !game) {
