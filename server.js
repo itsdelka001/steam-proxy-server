@@ -149,11 +149,20 @@ app.get('/search', async (req, res) => {
   }
 
   const url = `https://steamcommunity.com/market/search/render/?query=${encodeURIComponent(query)}&start=0&count=10&search_descriptions=0&sort_column=default&sort_dir=desc&appid=${appId}&norender=1`;
+  
+  // ---> ЛОГУВАННЯ: Відправка запиту на пошук
+  console.log(`[LOG] Відправка запиту на пошук Steam: ${url}`);
 
   try {
     const response = await fetch(url, { headers: defaultHeaders });
+    
+    // ---> ЛОГУВАННЯ: Статус відповіді
+    console.log(`[LOG] Відповідь від Steam Search API, статус: ${response.status}`);
+
     const data = await response.json();
     if (!data.success) {
+      // ---> ЛОГУВАННЯ: Помилка Steam API
+      console.error(`[ERROR] Steam API повернув помилку пошуку:`, data);
       return res.status(500).json({ error: 'Steam API error', steamData: data });
     }
     const items = data.results.map(item => ({
@@ -163,6 +172,7 @@ app.get('/search', async (req, res) => {
     }));
     res.json(items);
   } catch (error) {
+    // ---> ЛОГУВАННЯ: Виняток під час запиту
     console.error('Error fetching data from Steam:', error);
     res.status(500).json({ error: 'Failed to fetch data from Steam' });
   }
@@ -180,18 +190,34 @@ app.get('/current_price', async (req, res) => {
   }
 
   const url = `https://steamcommunity.com/market/priceoverview/?currency=3&appid=${appId}&market_hash_name=${encodeURIComponent(item_name)}`;
+  
+  // ---> ЛОГУВАННЯ: Відправка запиту на ціну
+  console.log(`[LOG] Відправка запиту на ціну Steam: ${url}`);
 
   try {
     const response = await fetch(url, { headers: defaultHeaders });
+    
+    // ---> ЛОГУВАННЯ: Статус відповіді
+    console.log(`[LOG] Відповідь від Steam Price API, статус: ${response.status}`);
+
+    // Перевірка на обмеження запитів
+    if (response.status === 429) {
+      console.error(`[ERROR] Steam API Rate Limit Exceeded: забагато запитів!`);
+      return res.status(429).json({ error: 'Too Many Requests to Steam API' });
+    }
+
     const data = await response.json();
 
     if (!data.success) {
+      // ---> ЛОГУВАННЯ: Помилка Steam API
+      console.error(`[ERROR] Steam API повернув помилку ціни:`, data);
       return res.status(500).json({ error: 'Steam API error', steamData: data });
     }
 
     const price = parseFloat(data.median_price.replace(',', '.').replace(/[^\d.]/g, ''));
     res.json({ price });
   } catch (error) {
+    // ---> ЛОГУВАННЯ: Виняток під час запиту
     console.error('Error fetching price from Steam:', error);
     res.status(500).json({ error: 'Failed to fetch price from Steam' });
   }
