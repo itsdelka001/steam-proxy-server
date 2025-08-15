@@ -136,6 +136,35 @@ app.delete('/api/investments/:id', async (req, res) => {
   }
 });
 
+// ---> НОВИЙ МАРШРУТ ДЛЯ КУРСІВ ВАЛЮТ
+app.get('/api/exchange-rates', async (req, res) => {
+  const apiKey = process.env.EXCHANGERATE_API_KEY;
+
+  if (!apiKey) {
+    console.error('ERROR: EXCHANGERATE_API_KEY is not set on the server.');
+    return res.status(500).json({ error: 'Exchange rate service is not configured.' });
+  }
+  
+  const url = `https://v6.exchangerate-api.com/v6/${apiKey}/latest/EUR`;
+  console.log(`[LOG] Fetching exchange rates from external API.`);
+  
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.result === 'success') {
+        res.status(200).json(data);
+    } else {
+        console.error('[ERROR] External exchange rate API returned an error:', data);
+        res.status(500).json({ error: 'Failed to retrieve exchange rates from provider.' });
+    }
+  } catch (error) {
+    console.error('Error fetching exchange rates:', error);
+    res.status(500).json({ error: 'Internal server error while fetching exchange rates.' });
+  }
+});
+
+
 // Steam API Proxy
 app.get('/search', async (req, res) => {
   const { query, game } = req.query;
