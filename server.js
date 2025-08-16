@@ -2,23 +2,19 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const admin = require('firebase-admin');
-// --- ДОДАНО: Модуль для криптографії, необхідний для DMarket API ---
 const crypto = require('crypto');
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-// --- ДОДАНО: Зчитування ключів DMarket та Steam з середовища ---
 const DMARKET_PUBLIC_KEY = process.env.DMARKET_PUBLIC_KEY;
 const DMARKET_SECRET_KEY = process.env.DMARKET_SECRET_KEY;
-const STEAM_API_KEY = process.env.STEAM_API_KEY; // Ваш існуючий ключ
+const STEAM_API_KEY = process.env.STEAM_API_KEY;
 
-// --- ДОДАНО: Перевірка наявності ключів при старті ---
 if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY || !STEAM_API_KEY) {
     console.warn("WARNING: One or more API keys (DMarket, Steam) are not defined in environment variables. Some functionality may not work.");
 }
 
-// Ініціалізація Firebase Admin SDK
 let serviceAccount;
 try {
   serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
@@ -33,32 +29,20 @@ try {
 
 const db = admin.firestore();
 
-// Логування запитів
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Incoming request: ${req.method} ${req.url}`);
   next();
 });
 
-// Налаштування CORS
 const allowedOrigins = [
   'http://localhost:3000',
   'https://steam-investment-app-frontend.vercel.app',
-  // Регулярний вираз для всіх preview-доменів Vercel
   /^https:\/\/steam-investment-app-frontend-[a-z0-9]+-itsdelka001s-projects\.vercel\.app$/
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (typeof allowed === 'string') return origin === allowed;
-      if (allowed instanceof RegExp) return allowed.test(origin);
-      return false;
-    });
-    if (isAllowed) {
+    if (!origin || allowedOrigins.some(pattern => typeof pattern === 'string' ? pattern === origin : pattern.test(origin))) {
       callback(null, true);
     } else {
       console.log(`CORS error: Origin ${origin} not allowed`);
@@ -85,52 +69,137 @@ function buildImageUrl(iconUrl) {
   return 'https://steamcommunity-a.akamaihd.net/economy/image/' + iconUrl;
 }
 
-// --- ДОДАНО: Маршрут-проксі для DMarket API ---
+// --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З API ---
+
+async function dmarketRequest(method, fullUrl) {
+    if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY) {
+        throw new Error('DMarket API keys are not configured on the server.');
+    }
+    const url = new URL(fullUrl);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const stringToSign = `${method}${url.pathname}${url.search}${''}${timestamp}`;
+    const signature = crypto.createHmac('sha256', DMARKET_SECRET_KEY).update(stringToSign).digest('hex');
+
+    const response = await fetch(url.toString(), {
+        method: method,
+        headers: {
+            'X-Api-Key': DMARKET_PUBLIC_KEY,
+            'X-Request-Sign': `dmar ed25519 ${signature}`,
+            'X-Sign-Date': timestamp,
+        }
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`DMarket API error: ${response.status} ${errorBody}`);
+    }
+    return response.json();
+}
+
+async function getSteamPrice(itemName, game) {
+    const appId = APP_IDS[game.toLowerCase()];
+    if (!appId) return { price: 0 };
+    
+    // currency=1 for USD to match DMarket
+    const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
+    try {
+        const response = await fetch(url, { headers: defaultHeaders });
+        if (!response.ok) return { price: 0 };
+        const data = await response.json();
+        if (!data.success) return { price: 0 };
+        
+        const priceString = data.lowest_price || data.median_price || "$0.00 USD";
+        const price = parseFloat(priceString.replace('$', '').replace(' USD', '').trim());
+        return { price };
+    } catch (error) {
+        console.error(`Failed to fetch Steam price for ${itemName}:`, error);
+        return { price: 0 };
+    }
+}
+
+// --- НОВИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
+app.get('/api/arbitrage-opportunities', async (req, res) => {
+    const { source, destination, gameId = 'a8db', limit = 50, currency = 'USD' } = req.query;
+
+    try {
+        let opportunities = [];
+        if (source === 'Steam' && destination === 'DMarket') {
+            const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}`;
+            const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
+            
+            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
+                return res.json([]);
+            }
+
+            const items = await Promise.all(
+                dmarketResponse.objects.map(async (item) => {
+                    const steamPriceData = await getSteamPrice(item.title, 'cs2');
+                    const destPrice = parseFloat(item.price[currency]) / 100;
+                    const sourcePrice = steamPriceData.price;
+                    if (sourcePrice === 0 || destPrice <= sourcePrice) return null;
+
+                    return {
+                        id: item.itemId, name: item.title, image: item.image,
+                        sourceMarket: 'Steam', sourcePrice: sourcePrice,
+                        destMarket: 'DMarket', destPrice: destPrice,
+                        fees: destPrice * 0.07, // Умовна комісія 7%
+                    };
+                })
+            );
+            opportunities = items.filter(op => op !== null);
+
+        } else if (source === 'DMarket' && destination === 'Steam') {
+             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}`;
+            const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
+
+            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
+                return res.json([]);
+            }
+
+            const items = await Promise.all(
+                dmarketResponse.objects.map(async (item) => {
+                    const steamPriceData = await getSteamPrice(item.title, 'cs2');
+                    const sourcePrice = parseFloat(item.price[currency]) / 100;
+                    const destPrice = steamPriceData.price;
+                    if (destPrice === 0 || sourcePrice >= destPrice) return null;
+
+                    return {
+                        id: item.itemId, name: item.title, image: item.image,
+                        sourceMarket: 'DMarket', sourcePrice: sourcePrice,
+                        destMarket: 'Steam', destPrice: destPrice,
+                        fees: destPrice * 0.15, // Умовна комісія Steam 15%
+                    };
+                })
+            );
+            opportunities = items.filter(op => op !== null);
+        } else {
+            console.log(`Arbitrage path from ${source} to ${destination} is not yet implemented.`);
+        }
+        res.status(200).json(opportunities);
+    } catch (error) {
+        console.error(`Error in arbitrage logic for ${source} -> ${destination}:`, error);
+        res.status(500).json({ error: "Failed to process arbitrage opportunities" });
+    }
+});
+
+
+// --- ІСНУЮЧІ МАРШРУТИ (БЕЗ ЗМІН) ---
+
+// Маршрут-проксі для DMarket API (залишаємо для можливого прямого використання)
 app.get('/api/dmarket-proxy', async (req, res) => {
     if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY) {
         return res.status(500).json({ error: 'DMarket API keys are not configured on the server.' });
     }
-
     const DMARKET_API_BASE = "https://api.dmarket.com";
     const { path, ...queryParams } = req.query;
-    
     if (!path) {
         return res.status(400).json({ error: 'API path is required' });
     }
-
     const url = new URL(`${DMARKET_API_BASE}${path}`);
     Object.keys(queryParams).forEach(key => url.searchParams.append(key, queryParams[key]));
-
-    const method = 'GET';
-    const requestBody = '';
-    const timestamp = Math.floor(Date.now() / 1000);
-    const stringToSign = `${method}${url.pathname}${url.search}${requestBody}${timestamp}`;
-
-    const signature = crypto
-        .createHmac('sha256', DMARKET_SECRET_KEY)
-        .update(stringToSign)
-        .digest('hex');
-
     try {
-        const response = await fetch(url.toString(), {
-            method: method,
-            headers: {
-                'X-Api-Key': DMARKET_PUBLIC_KEY,
-                'X-Request-Sign': `dmar ed25519 ${signature}`,
-                'X-Sign-Date': timestamp,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        const data = await response.json();
-        
-        if (!response.ok) {
-            console.error(`[DMarket Proxy] Error from DMarket API: ${response.status}`, data);
-            return res.status(response.status).json(data);
-        }
-
+        const data = await dmarketRequest('GET', url.toString());
         res.status(200).json(data);
-
     } catch (error) {
         console.error('[DMarket Proxy] Internal error:', error);
         res.status(500).json({ error: 'Failed to fetch from DMarket API' });
@@ -223,7 +292,7 @@ app.get('/search', async (req, res) => {
     }
     const items = data.results.map(item => ({
       name: item.name,
-      market_hash_name: item.hash_name, // Corrected from market_hash_name
+      market_hash_name: item.hash_name,
       icon_url: buildImageUrl(item.asset_description.icon_url)
     }));
     res.json(items);
