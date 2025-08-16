@@ -236,8 +236,8 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
 
             // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Основна пауза між успішними запитами до Steam
             if (destination === 'Steam' || source === 'Steam') {
-                console.log(`[LOG] Pausing for 3 seconds before next Steam API request...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                console.log(`[LOG] Pausing for 3,7 seconds before next Steam API request...`);
+                await new Promise(resolve => setTimeout(resolve, 3750));
             }
         }
         
