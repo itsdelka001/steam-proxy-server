@@ -95,26 +95,35 @@ async function dmarketRequest(method, fullUrl) {
 
 async function getSteamPrice(itemName, game) {
     const appId = APP_IDS[game.toLowerCase()];
-    if (!appId) return { price: 0 };
+    if (!appId) {
+        console.log(`[LOG] getSteamPrice: Invalid game specified for ${itemName}`);
+        return { price: 0, reason: "Invalid game" };
+    }
     
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
         await new Promise(resolve => setTimeout(resolve, 300));
         const response = await fetch(url, { headers: defaultHeaders });
-        if (!response.ok) return { price: 0 };
+        if (!response.ok) {
+            console.log(`[LOG] getSteamPrice for '${itemName}': Steam API returned status ${response.status}`);
+            return { price: 0, reason: `Steam API HTTP Error ${response.status}` };
+        }
         const data = await response.json();
-        if (!data.success) return { price: 0 };
+        if (!data.success) {
+            console.log(`[LOG] getSteamPrice for '${itemName}': Steam API returned success:false.`);
+            return { price: 0, reason: "Steam API success:false" };
+        }
         
         const priceString = data.lowest_price || data.median_price || "$0.00 USD";
         const price = parseFloat(priceString.replace('$', '').replace(' USD', '').trim());
-        return { price };
+        console.log(`[LOG] getSteamPrice for '${itemName}': Found price $${price}`);
+        return { price, reason: "OK" };
     } catch (error) {
-        console.error(`Failed to fetch Steam price for ${itemName}:`, error);
-        return { price: 0 };
+        console.error(`[ERROR] getSteamPrice for '${itemName}': CRITICAL FETCH ERROR:`, error.message);
+        return { price: 0, reason: "Critical fetch error" };
     }
 }
 
-// --- ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Додано заголовок 'Accept-Encoding' ---
 async function skinportRequest(url) {
     if (!SKINPORT_CLIENT_ID || !SKINPORT_CLIENT_SECRET) {
         throw new Error('Skinport API keys are not configured.');
@@ -133,28 +142,36 @@ async function skinportRequest(url) {
 }
 
 
-// --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
+// --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ З ПОВНИМ ЛОГУВАННЯМ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
-    // ІНТЕГРОВАНО: Приймаємо ліміт з фронтенду, за замовчуванням 200
     const { source, destination, gameId = 'a8db', limit = 100, currency = 'USD' } = req.query;
+    console.log(`\n--- [NEW REQUEST] ---`);
+    console.log(`[LOG] Starting arbitrage check for ${source} -> ${destination} with limit ${limit}`);
 
     try {
         let opportunities = [];
         if (source === 'Steam' && destination === 'DMarket') {
-            // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: DMarket не приймає ліміт більше 100
             const dmarketLimit = Math.min(limit, 100);
             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${dmarketLimit}&currency=${currency}&orderBy=price&orderDir=asc`;
+            console.log(`[LOG] Fetching from DMarket: ${dmarketUrl}`);
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
             
-            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) return res.json([]);
+            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
+                console.log(`[LOG] DMarket returned 0 items. Aborting.`);
+                return res.json([]);
+            }
+            console.log(`[LOG] Received ${dmarketResponse.objects.length} items from DMarket.`);
 
             const items = await Promise.all(
                 dmarketResponse.objects.map(async (item) => {
                     const steamPriceData = await getSteamPrice(item.title, 'cs2');
                     const destPrice = parseFloat(item.price[currency]) / 100;
                     const sourcePrice = steamPriceData.price;
-                    // ІНТЕГРОВАНО: Забираємо фільтр, щоб бачити більше варіантів
-                    if (sourcePrice === 0) return null;
+                    
+                    if (sourcePrice === 0) {
+                        console.log(`[FILTER] Skipping '${item.title}' because Steam price could not be found (Reason: ${steamPriceData.reason}).`);
+                        return null;
+                    }
                     return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'Steam', sourcePrice, destMarket: 'DMarket', destPrice, fees: destPrice * 0.07 };
                 })
             );
@@ -162,44 +179,62 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
         } else if (source === 'DMarket' && destination === 'Steam') {
             const dmarketLimit = Math.min(limit, 100);
             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${dmarketLimit}&currency=${currency}&orderBy=price&orderDir=asc`;
+            console.log(`[LOG] Fetching from DMarket: ${dmarketUrl}`);
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
-            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) return res.json([]);
+            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
+                 console.log(`[LOG] DMarket returned 0 items. Aborting.`);
+                 return res.json([]);
+            }
+            console.log(`[LOG] Received ${dmarketResponse.objects.length} items from DMarket.`);
 
             const items = await Promise.all(
                 dmarketResponse.objects.map(async (item) => {
                     const steamPriceData = await getSteamPrice(item.title, 'cs2');
                     const sourcePrice = parseFloat(item.price[currency]) / 100;
                     const destPrice = steamPriceData.price;
-                    if (destPrice === 0) return null;
+                    if (destPrice === 0) {
+                        console.log(`[FILTER] Skipping '${item.title}' because Steam price could not be found (Reason: ${steamPriceData.reason}).`);
+                        return null;
+                    }
                     return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'DMarket', sourcePrice, destMarket: 'Steam', destPrice, fees: destPrice * 0.15 };
                 })
             );
             opportunities = items.filter(op => op !== null);
         } else if (source === 'Steam' && destination === 'Skinport') {
-            // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Skinport не приймає параметри сортування та ліміту в цьому ендпоінті
             const skinportUrl = `https://api.skinport.com/v1/items?app_id=730&currency=USD`;
+            console.log(`[LOG] Fetching from Skinport: ${skinportUrl}`);
             const skinportResponse = await skinportRequest(skinportUrl);
-            if (!skinportResponse || skinportResponse.length === 0) return res.json([]);
-
-            // Обмежуємо кількість на сервері, оскільки API віддає все
+            if (!skinportResponse || skinportResponse.length === 0) {
+                console.log(`[LOG] Skinport returned 0 items. Aborting.`);
+                return res.json([]);
+            }
+            console.log(`[LOG] Received ${skinportResponse.length} items from Skinport.`);
+            
             const limitedResponse = skinportResponse.slice(0, limit);
+            console.log(`[LOG] Processing first ${limitedResponse.length} items due to limit.`);
 
             const items = await Promise.all(
                 limitedResponse.map(async (item) => {
                     const steamPriceData = await getSteamPrice(item.market_hash_name, 'cs2');
                     const destPrice = item.min_price / 100;
                     const sourcePrice = steamPriceData.price;
-                    if (sourcePrice === 0) return null;
+                    if (sourcePrice === 0) {
+                        console.log(`[FILTER] Skipping '${item.market_hash_name}' because Steam price could not be found (Reason: ${steamPriceData.reason}).`);
+                        return null;
+                    }
                     return { id: item.item_page, name: item.market_hash_name, image: item.image_url, sourceMarket: 'Steam', sourcePrice, destMarket: 'Skinport', destPrice, fees: destPrice * 0.12 };
                 })
             );
             opportunities = items.filter(op => op !== null);
         } else {
-            console.log(`Arbitrage path from ${source} to ${destination} is not yet implemented.`);
+            console.log(`[LOG] Arbitrage path from ${source} to ${destination} is not yet implemented.`);
         }
+        
+        console.log(`[RESULT] Found ${opportunities.length} total pairs for ${source} -> ${destination}. Sending to client.`);
+        console.log(`--- [REQUEST END] ---\n`);
         res.status(200).json(opportunities);
     } catch (error) {
-        console.error(`Error in arbitrage logic for ${source} -> ${destination}:`, error);
+        console.error(`[CRITICAL ERROR] in arbitrage logic for ${source} -> ${destination}:`, error.message);
         res.status(500).json({ error: "Failed to process arbitrage opportunities" });
     }
 });
