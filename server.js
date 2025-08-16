@@ -10,9 +10,16 @@ const port = process.env.PORT || 3001;
 const DMARKET_PUBLIC_KEY = process.env.DMARKET_PUBLIC_KEY;
 const DMARKET_SECRET_KEY = process.env.DMARKET_SECRET_KEY;
 const STEAM_API_KEY = process.env.STEAM_API_KEY;
+// --- ІНТЕГРАЦІЯ SKINPORT: Зчитуємо ключі ---
+const SKINPORT_CLIENT_ID = process.env.SKINPORT_CLIENT_ID;
+const SKINPORT_CLIENT_SECRET = process.env.SKINPORT_CLIENT_SECRET;
+
 
 if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY || !STEAM_API_KEY) {
     console.warn("WARNING: One or more API keys (DMarket, Steam) are not defined in environment variables. Some functionality may not work.");
+}
+if (!SKINPORT_CLIENT_ID || !SKINPORT_CLIENT_SECRET) {
+    console.warn("WARNING: Skinport API keys are not defined. Skinport functionality will be disabled.");
 }
 
 let serviceAccount;
@@ -40,9 +47,6 @@ const allowedOrigins = [
   /^https:\/\/steam-investment-app-frontend-[a-z0-9]+-itsdelka001s-projects\.vercel\.app$/
 ];
 
-// --- ІНТЕГРОВАНО ВИПРАВЛЕННЯ CORS ---
-// Замість складної функції, використовуємо простішу та надійнішу конфігурацію.
-// Цей код прямо каже серверу: "Дозволяй запити з усіх джерел у списку allowedOrigins".
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 
@@ -96,6 +100,7 @@ async function getSteamPrice(itemName, game) {
     
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
+        await new Promise(resolve => setTimeout(resolve, 300)); // Затримка для уникнення rate limit
         const response = await fetch(url, { headers: defaultHeaders });
         if (!response.ok) return { price: 0 };
         const data = await response.json();
@@ -110,19 +115,37 @@ async function getSteamPrice(itemName, game) {
     }
 }
 
-// --- НОВИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
+// --- ІНТЕГРАЦІЯ SKINPORT: Допоміжна функція для запитів до Skinport API ---
+async function skinportRequest(url) {
+    if (!SKINPORT_CLIENT_ID || !SKINPORT_CLIENT_SECRET) {
+        throw new Error('Skinport API keys are not configured.');
+    }
+    const response = await fetch(url, {
+        headers: {
+            'Authorization': 'Basic ' + Buffer.from(SKINPORT_CLIENT_ID + ':' + SKINPORT_CLIENT_SECRET).toString('base64')
+        }
+    });
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Skinport API error: ${response.status} ${errorBody}`);
+    }
+    return response.json();
+}
+
+
+// --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
-    const { source, destination, gameId = 'a8db', limit = 50, currency = 'USD' } = req.query;
+    // Збільшуємо ліміт для кращої вибірки
+    const { source, destination, gameId = 'a8db', limit = 100, currency = 'USD' } = req.query;
 
     try {
         let opportunities = [];
+        // --- Сценарій 1: Steam -> DMarket ---
         if (source === 'Steam' && destination === 'DMarket') {
-            const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}`;
+            const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}&orderBy=price&orderDir=asc`;
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
             
-            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
-                return res.json([]);
-            }
+            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) return res.json([]);
 
             const items = await Promise.all(
                 dmarketResponse.objects.map(async (item) => {
@@ -130,24 +153,15 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                     const destPrice = parseFloat(item.price[currency]) / 100;
                     const sourcePrice = steamPriceData.price;
                     if (sourcePrice === 0 || destPrice <= sourcePrice) return null;
-
-                    return {
-                        id: item.itemId, name: item.title, image: item.image,
-                        sourceMarket: 'Steam', sourcePrice: sourcePrice,
-                        destMarket: 'DMarket', destPrice: destPrice,
-                        fees: destPrice * 0.07,
-                    };
+                    return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'Steam', sourcePrice, destMarket: 'DMarket', destPrice, fees: destPrice * 0.07 };
                 })
             );
             opportunities = items.filter(op => op !== null);
-
+        // --- Сценарій 2: DMarket -> Steam ---
         } else if (source === 'DMarket' && destination === 'Steam') {
-             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}`;
+            const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}&orderBy=price&orderDir=asc`;
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
-
-            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
-                return res.json([]);
-            }
+            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) return res.json([]);
 
             const items = await Promise.all(
                 dmarketResponse.objects.map(async (item) => {
@@ -155,13 +169,23 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                     const sourcePrice = parseFloat(item.price[currency]) / 100;
                     const destPrice = steamPriceData.price;
                     if (destPrice === 0 || sourcePrice >= destPrice) return null;
+                    return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'DMarket', sourcePrice, destMarket: 'Steam', destPrice, fees: destPrice * 0.15 };
+                })
+            );
+            opportunities = items.filter(op => op !== null);
+        // --- ІНТЕГРАЦІЯ SKINPORT: Сценарій 3: Steam -> Skinport ---
+        } else if (source === 'Steam' && destination === 'Skinport') {
+            const skinportUrl = `https://api.skinport.com/v1/items?app_id=730&currency=USD&sort=price&order=asc&limit=${limit}`;
+            const skinportResponse = await skinportRequest(skinportUrl);
+            if (!skinportResponse || skinportResponse.length === 0) return res.json([]);
 
-                    return {
-                        id: item.itemId, name: item.title, image: item.image,
-                        sourceMarket: 'DMarket', sourcePrice: sourcePrice,
-                        destMarket: 'Steam', destPrice: destPrice,
-                        fees: destPrice * 0.15,
-                    };
+            const items = await Promise.all(
+                skinportResponse.map(async (item) => {
+                    const steamPriceData = await getSteamPrice(item.market_hash_name, 'cs2');
+                    const destPrice = item.suggested_price / 100; // Skinport ціни в центах
+                    const sourcePrice = steamPriceData.price;
+                    if (sourcePrice === 0 || destPrice <= sourcePrice) return null;
+                    return { id: item.item_id, name: item.market_hash_name, image: item.image_url, sourceMarket: 'Steam', sourcePrice, destMarket: 'Skinport', destPrice, fees: destPrice * 0.12 }; // Комісія Skinport 12%
                 })
             );
             opportunities = items.filter(op => op !== null);
@@ -175,8 +199,8 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
     }
 });
 
-// --- ІСНУЮЧІ МАРШРУТИ (БЕЗ ЗМІН) ---
 
+// --- ІСНУЮЧІ МАРШРУТИ (БЕЗ ЗМІН) ---
 app.get('/api/investments', async (req, res) => {
   try {
     const investmentsRef = db.collection('investments');
@@ -188,7 +212,6 @@ app.get('/api/investments', async (req, res) => {
     res.status(500).send('Error fetching data from Firestore');
   }
 });
-
 app.post('/api/investments', async (req, res) => {
   try {
     const newItem = req.body;
@@ -199,7 +222,6 @@ app.post('/api/investments', async (req, res) => {
     res.status(500).send('Error adding data to Firestore');
   }
 });
-
 app.put('/api/investments/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -211,7 +233,6 @@ app.put('/api/investments/:id', async (req, res) => {
     res.status(500).send('Error updating data in Firestore');
   }
 });
-
 app.delete('/api/investments/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -222,7 +243,6 @@ app.delete('/api/investments/:id', async (req, res) => {
     res.status(500).send('Error deleting data from Firestore');
   }
 });
-
 app.get('/api/exchange-rates', async (req, res) => {
   const apiKey = process.env.EXCHANGERATE_API_KEY;
   if (!apiKey) {
@@ -243,7 +263,6 @@ app.get('/api/exchange-rates', async (req, res) => {
     res.status(500).json({ error: 'Internal server error while fetching exchange rates.' });
   }
 });
-
 app.get('/search', async (req, res) => {
   const { query, game } = req.query;
   const appId = APP_IDS[game.toLowerCase()];
@@ -269,7 +288,6 @@ app.get('/search', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch from Steam' });
   }
 });
-
 app.get('/current_price', async (req, res) => {
     const { item_name, game } = req.query;
     if (!item_name || !game) {
@@ -298,7 +316,6 @@ app.get('/current_price', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch price from Steam' });
     }
 });
-
 app.post('/market_analysis', async (req, res) => {
   const { itemName, game } = req.body;
   if (!itemName || !game) {
@@ -312,7 +329,6 @@ app.post('/market_analysis', async (req, res) => {
     res.status(500).json({ error: 'Failed to generate market analysis' });
   }
 });
-
 app.get('/price_history', async (req, res) => {
     const { item_name, game } = req.query;
     if (!item_name || !game) {
@@ -360,6 +376,7 @@ app.get('/price_history', async (req, res) => {
         res.status(500).json({ success: false, error: 'Failed to fetch price history from Steam' });
     }
 });
+
 
 app.listen(port, () => {
   console.log(`Proxy server listening at port ${port}`);
