@@ -40,17 +40,11 @@ const allowedOrigins = [
   /^https:\/\/steam-investment-app-frontend-[a-z0-9]+-itsdelka001s-projects\.vercel\.app$/
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.some(pattern => typeof pattern === 'string' ? pattern === origin : pattern.test(origin))) {
-      callback(null, true);
-    } else {
-      console.log(`CORS error: Origin ${origin} not allowed`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
+// --- ІНТЕГРОВАНО ВИПРАВЛЕННЯ CORS ---
+// Замість складної функції, використовуємо простішу та надійнішу конфігурацію.
+// Цей код прямо каже серверу: "Дозволяй запити з усіх джерел у списку allowedOrigins".
+app.use(cors({ origin: allowedOrigins, credentials: true }));
+
 
 app.use(express.json());
 
@@ -69,7 +63,7 @@ function buildImageUrl(iconUrl) {
   return 'https://steamcommunity-a.akamaihd.net/economy/image/' + iconUrl;
 }
 
-// --- ІНТЕГРОВАНО: ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З API ---
+// --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З API ---
 
 async function dmarketRequest(method, fullUrl) {
     if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY) {
@@ -100,7 +94,6 @@ async function getSteamPrice(itemName, game) {
     const appId = APP_IDS[game.toLowerCase()];
     if (!appId) return { price: 0 };
     
-    // currency=1 for USD to match DMarket
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
         const response = await fetch(url, { headers: defaultHeaders });
@@ -117,7 +110,7 @@ async function getSteamPrice(itemName, game) {
     }
 }
 
-// --- ІНТЕГРОВАНО: НОВИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
+// --- НОВИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
     const { source, destination, gameId = 'a8db', limit = 50, currency = 'USD' } = req.query;
 
@@ -142,7 +135,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                         id: item.itemId, name: item.title, image: item.image,
                         sourceMarket: 'Steam', sourcePrice: sourcePrice,
                         destMarket: 'DMarket', destPrice: destPrice,
-                        fees: destPrice * 0.07, // Умовна комісія 7%
+                        fees: destPrice * 0.07,
                     };
                 })
             );
@@ -167,7 +160,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                         id: item.itemId, name: item.title, image: item.image,
                         sourceMarket: 'DMarket', sourcePrice: sourcePrice,
                         destMarket: 'Steam', destPrice: destPrice,
-                        fees: destPrice * 0.15, // Умовна комісія Steam 15%
+                        fees: destPrice * 0.15,
                     };
                 })
             );
