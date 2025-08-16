@@ -135,6 +135,7 @@ async function skinportRequest(url) {
 
 // --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
+    // ІНТЕГРОВАНО: Приймаємо ліміт з фронтенду, за замовчуванням 200
     const { source, destination, gameId = 'a8db', limit = 100, currency = 'USD' } = req.query;
 
     try {
@@ -152,6 +153,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                     const steamPriceData = await getSteamPrice(item.title, 'cs2');
                     const destPrice = parseFloat(item.price[currency]) / 100;
                     const sourcePrice = steamPriceData.price;
+                    // ІНТЕГРОВАНО: Забираємо фільтр, щоб бачити більше варіантів
                     if (sourcePrice === 0) return null;
                     return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'Steam', sourcePrice, destMarket: 'DMarket', destPrice, fees: destPrice * 0.07 };
                 })
