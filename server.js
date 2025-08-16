@@ -7,6 +7,10 @@ const crypto = require('crypto');
 const app = express();
 const port = process.env.PORT || 3001;
 
+// --- ІНТЕГРАЦІЯ: Налаштування кешування цін Steam ---
+const steamPriceCache = new Map();
+const CACHE_TTL = 2 * 60 * 60 * 1000; // 2 години в мілісекундах
+
 const DMARKET_PUBLIC_KEY = process.env.DMARKET_PUBLIC_KEY;
 const DMARKET_SECRET_KEY = process.env.DMARKET_SECRET_KEY;
 const STEAM_API_KEY = process.env.STEAM_API_KEY;
@@ -93,16 +97,31 @@ async function dmarketRequest(method, fullUrl) {
     return response.json();
 }
 
+// --- ІНТЕГРАЦІЯ: Оновлена функція з логікою кешування та централізованою затримкою ---
 async function getSteamPrice(itemName, game) {
+    const cacheKey = `${game}:${itemName}`;
+    const cachedEntry = steamPriceCache.get(cacheKey);
+
+    // Крок 1: Перевіряємо кеш. Якщо є свіжа ціна - повертаємо її.
+    if (cachedEntry && (Date.now() - cachedEntry.timestamp < CACHE_TTL)) {
+        console.log(`[CACHE] '${itemName}': Використано кешовану ціну $${cachedEntry.price}`);
+        return { price: cachedEntry.price, reason: "CACHED" };
+    }
+
+    // Крок 2: Якщо в кеші нічого немає, робимо запит до API з паузою.
+    console.log(`[API] '${itemName}': Немає в кеші. Запит до Steam API...`);
+    
+    // Пауза 3.5 секунди перед кожним реальним запитом до Steam
+    await new Promise(resolve => setTimeout(resolve, 3500));
+    
     const appId = APP_IDS[game.toLowerCase()];
     if (!appId) {
-        console.log(`[LOG] getSteamPrice: Invalid game specified for ${itemName}`);
+        console.log(`[LOG] getSteamPrice: Invalid game for ${itemName}`);
         return { price: 0, reason: "Invalid game" };
     }
     
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
-        // ВИДАЛЕНО ЗАЙВУ ЗАТРИМКУ: Пауза тепер контролюється в основному циклі
         const response = await fetch(url, { headers: defaultHeaders });
         if (!response.ok) {
             console.log(`[LOG] getSteamPrice for '${itemName}': Steam API returned status ${response.status}`);
@@ -116,13 +135,18 @@ async function getSteamPrice(itemName, game) {
         
         const priceString = data.lowest_price || data.median_price || "$0.00 USD";
         const price = parseFloat(priceString.replace('$', '').replace(' USD', '').trim());
-        console.log(`[LOG] getSteamPrice for '${itemName}': Found price $${price}`);
+        
+        // Крок 3: Зберігаємо нову ціну в кеш
+        steamPriceCache.set(cacheKey, { price: price, timestamp: Date.now() });
+        console.log(`[CACHE] '${itemName}': Збережено нову ціну $${price} в кеш.`);
+        
         return { price, reason: "OK" };
     } catch (error) {
         console.error(`[ERROR] getSteamPrice for '${itemName}': CRITICAL FETCH ERROR:`, error.message);
         return { price: 0, reason: "Critical fetch error" };
     }
 }
+
 
 async function skinportRequest(url) {
     if (!SKINPORT_CLIENT_ID || !SKINPORT_CLIENT_SECRET) {
@@ -142,7 +166,7 @@ async function skinportRequest(url) {
 }
 
 
-// --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ З ПОВНИМ ЛОГУВАННЯМ ---
+// --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
     const { source, destination, gameId = 'a8db', limit = 100, currency = 'USD' } = req.query;
     console.log(`\n--- [NEW REQUEST] ---`);
@@ -152,7 +176,6 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
         let opportunities = [];
         let initialItems = [];
 
-        // Крок 1: Отримуємо початковий список предметів з одного ринку
         if (destination === 'DMarket' || source === 'DMarket') {
             const dmarketLimit = Math.min(limit, 100);
             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${dmarketLimit}&currency=${currency}&orderBy=price&orderDir=asc`;
@@ -186,12 +209,11 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
         }
 
         if (initialItems.length === 0) {
-            console.log(`[LOG] Source market (${source === 'Steam' ? destination : source}) returned 0 items. Aborting.`);
+            console.log(`[LOG] Source market returned 0 items. Aborting.`);
             return res.json([]);
         }
         console.log(`[LOG] Received ${initialItems.length} items from source market.`);
 
-        // Крок 2: Послідовно перевіряємо ціни на іншому ринку
         console.log(`[LOG] Starting sequential price check on destination market...`);
         for (const item of initialItems) {
             let sourcePrice = 0;
@@ -210,12 +232,8 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
             
             if (otherMarketPriceData.price === 0) {
                 console.log(`[FILTER] Skipping '${item.name}' because destination price could not be found (Reason: ${otherMarketPriceData.reason}).`);
-                 // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Додаємо паузу навіть якщо запит невдалий, щоб уникнути блокування
-                if (destination === 'Steam' || source === 'Steam') {
-                    console.log(`[LOG] Pausing for 3 seconds after failed Steam API request...`);
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                }
-                continue; // Переходимо до наступного предмету
+                // ВИДАЛЕНО ЗАЙВУ ЗАТРИМКУ: Пауза тепер контролюється всередині getSteamPrice
+                continue;
             }
 
             let fees = 0;
@@ -233,12 +251,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                 destPrice: destPrice,
                 fees: fees
             });
-
-            // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Основна пауза між успішними запитами до Steam
-            if (destination === 'Steam' || source === 'Steam') {
-                console.log(`[LOG] Pausing for 3,7 seconds before next Steam API request...`);
-                await new Promise(resolve => setTimeout(resolve, 3750));
-            }
+            // ВИДАЛЕНО ЗАЙВУ ЗАТРИМКУ: Пауза тепер контролюється всередині getSteamPrice
         }
         
         console.log(`[RESULT] Found ${opportunities.length} total pairs for ${source} -> ${destination}. Sending to client.`);
