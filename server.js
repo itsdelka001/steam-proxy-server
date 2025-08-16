@@ -213,7 +213,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                  // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Додаємо паузу навіть якщо запит невдалий, щоб уникнути блокування
                 if (destination === 'Steam' || source === 'Steam') {
                     console.log(`[LOG] Pausing for 3 seconds after failed Steam API request...`);
-                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                 }
                 continue; // Переходимо до наступного предмету
             }
@@ -237,7 +237,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
             // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Основна пауза між успішними запитами до Steam
             if (destination === 'Steam' || source === 'Steam') {
                 console.log(`[LOG] Pausing for 3 seconds before next Steam API request...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                await new Promise(resolve => setTimeout(resolve, 5000));
             }
         }
         
