@@ -102,8 +102,7 @@ async function getSteamPrice(itemName, game) {
     
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
-        // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Збільшуємо затримку, щоб зменшити шанс rate limit
-        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 секунда
+        // ВИДАЛЕНО ЗАЙВУ ЗАТРИМКУ: Пауза тепер контролюється в основному циклі
         const response = await fetch(url, { headers: defaultHeaders });
         if (!response.ok) {
             console.log(`[LOG] getSteamPrice for '${itemName}': Steam API returned status ${response.status}`);
@@ -192,7 +191,7 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
         }
         console.log(`[LOG] Received ${initialItems.length} items from source market.`);
 
-        // Крок 2: ІНТЕГРОВАНО ВИПРАВЛЕННЯ - Послідовно перевіряємо ціни на іншому ринку
+        // Крок 2: Послідовно перевіряємо ціни на іншому ринку
         console.log(`[LOG] Starting sequential price check on destination market...`);
         for (const item of initialItems) {
             let sourcePrice = 0;
@@ -211,6 +210,11 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
             
             if (otherMarketPriceData.price === 0) {
                 console.log(`[FILTER] Skipping '${item.name}' because destination price could not be found (Reason: ${otherMarketPriceData.reason}).`);
+                 // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Додаємо паузу навіть якщо запит невдалий, щоб уникнути блокування
+                if (destination === 'Steam' || source === 'Steam') {
+                    console.log(`[LOG] Pausing for 3 seconds after failed Steam API request...`);
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
                 continue; // Переходимо до наступного предмету
             }
 
@@ -229,6 +233,12 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                 destPrice: destPrice,
                 fees: fees
             });
+
+            // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Основна пауза між успішними запитами до Steam
+            if (destination === 'Steam' || source === 'Steam') {
+                console.log(`[LOG] Pausing for 3 seconds before next Steam API request...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
         }
         
         console.log(`[RESULT] Found ${opportunities.length} total pairs for ${source} -> ${destination}. Sending to client.`);
