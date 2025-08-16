@@ -102,7 +102,8 @@ async function getSteamPrice(itemName, game) {
     
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Збільшуємо затримку, щоб зменшити шанс rate limit
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 секунда
         const response = await fetch(url, { headers: defaultHeaders });
         if (!response.ok) {
             console.log(`[LOG] getSteamPrice for '${itemName}': Steam API returned status ${response.status}`);
@@ -150,84 +151,84 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
 
     try {
         let opportunities = [];
-        if (source === 'Steam' && destination === 'DMarket') {
+        let initialItems = [];
+
+        // Крок 1: Отримуємо початковий список предметів з одного ринку
+        if (destination === 'DMarket' || source === 'DMarket') {
             const dmarketLimit = Math.min(limit, 100);
             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${dmarketLimit}&currency=${currency}&orderBy=price&orderDir=asc`;
             console.log(`[LOG] Fetching from DMarket: ${dmarketUrl}`);
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
-            
-            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
-                console.log(`[LOG] DMarket returned 0 items. Aborting.`);
-                return res.json([]);
+            if (dmarketResponse.objects && dmarketResponse.objects.length > 0) {
+                initialItems = dmarketResponse.objects.map(item => ({
+                    name: item.title,
+                    price: parseFloat(item.price[currency]) / 100,
+                    image: item.image,
+                    id: item.itemId,
+                    market: 'DMarket'
+                }));
             }
-            console.log(`[LOG] Received ${dmarketResponse.objects.length} items from DMarket.`);
-
-            const items = await Promise.all(
-                dmarketResponse.objects.map(async (item) => {
-                    const steamPriceData = await getSteamPrice(item.title, 'cs2');
-                    const destPrice = parseFloat(item.price[currency]) / 100;
-                    const sourcePrice = steamPriceData.price;
-                    
-                    if (sourcePrice === 0) {
-                        console.log(`[FILTER] Skipping '${item.title}' because Steam price could not be found (Reason: ${steamPriceData.reason}).`);
-                        return null;
-                    }
-                    return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'Steam', sourcePrice, destMarket: 'DMarket', destPrice, fees: destPrice * 0.07 };
-                })
-            );
-            opportunities = items.filter(op => op !== null);
-        } else if (source === 'DMarket' && destination === 'Steam') {
-            const dmarketLimit = Math.min(limit, 100);
-            const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${dmarketLimit}&currency=${currency}&orderBy=price&orderDir=asc`;
-            console.log(`[LOG] Fetching from DMarket: ${dmarketUrl}`);
-            const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
-            if (!dmarketResponse.objects || dmarketResponse.objects.length === 0) {
-                 console.log(`[LOG] DMarket returned 0 items. Aborting.`);
-                 return res.json([]);
-            }
-            console.log(`[LOG] Received ${dmarketResponse.objects.length} items from DMarket.`);
-
-            const items = await Promise.all(
-                dmarketResponse.objects.map(async (item) => {
-                    const steamPriceData = await getSteamPrice(item.title, 'cs2');
-                    const sourcePrice = parseFloat(item.price[currency]) / 100;
-                    const destPrice = steamPriceData.price;
-                    if (destPrice === 0) {
-                        console.log(`[FILTER] Skipping '${item.title}' because Steam price could not be found (Reason: ${steamPriceData.reason}).`);
-                        return null;
-                    }
-                    return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'DMarket', sourcePrice, destMarket: 'Steam', destPrice, fees: destPrice * 0.15 };
-                })
-            );
-            opportunities = items.filter(op => op !== null);
-        } else if (source === 'Steam' && destination === 'Skinport') {
+        } else if (destination === 'Skinport' || source === 'Skinport') {
             const skinportUrl = `https://api.skinport.com/v1/items?app_id=730&currency=USD`;
             console.log(`[LOG] Fetching from Skinport: ${skinportUrl}`);
             const skinportResponse = await skinportRequest(skinportUrl);
-            if (!skinportResponse || skinportResponse.length === 0) {
-                console.log(`[LOG] Skinport returned 0 items. Aborting.`);
-                return res.json([]);
+            if (skinportResponse && skinportResponse.length > 0) {
+                initialItems = skinportResponse.slice(0, limit).map(item => ({
+                    name: item.market_hash_name,
+                    price: item.min_price / 100,
+                    image: item.image_url,
+                    id: item.item_page,
+                    market: 'Skinport'
+                }));
             }
-            console.log(`[LOG] Received ${skinportResponse.length} items from Skinport.`);
-            
-            const limitedResponse = skinportResponse.slice(0, limit);
-            console.log(`[LOG] Processing first ${limitedResponse.length} items due to limit.`);
-
-            const items = await Promise.all(
-                limitedResponse.map(async (item) => {
-                    const steamPriceData = await getSteamPrice(item.market_hash_name, 'cs2');
-                    const destPrice = item.min_price / 100;
-                    const sourcePrice = steamPriceData.price;
-                    if (sourcePrice === 0) {
-                        console.log(`[FILTER] Skipping '${item.market_hash_name}' because Steam price could not be found (Reason: ${steamPriceData.reason}).`);
-                        return null;
-                    }
-                    return { id: item.item_page, name: item.market_hash_name, image: item.image_url, sourceMarket: 'Steam', sourcePrice, destMarket: 'Skinport', destPrice, fees: destPrice * 0.12 };
-                })
-            );
-            opportunities = items.filter(op => op !== null);
         } else {
-            console.log(`[LOG] Arbitrage path from ${source} to ${destination} is not yet implemented.`);
+             console.log(`[LOG] Arbitrage path from ${source} to ${destination} is not yet implemented.`);
+             return res.json([]);
+        }
+
+        if (initialItems.length === 0) {
+            console.log(`[LOG] Source market (${source === 'Steam' ? destination : source}) returned 0 items. Aborting.`);
+            return res.json([]);
+        }
+        console.log(`[LOG] Received ${initialItems.length} items from source market.`);
+
+        // Крок 2: ІНТЕГРОВАНО ВИПРАВЛЕННЯ - Послідовно перевіряємо ціни на іншому ринку
+        console.log(`[LOG] Starting sequential price check on destination market...`);
+        for (const item of initialItems) {
+            let sourcePrice = 0;
+            let destPrice = 0;
+            let otherMarketPriceData = { price: 0, reason: "Not implemented" };
+
+            if (source === 'Steam') {
+                otherMarketPriceData = await getSteamPrice(item.name, 'cs2');
+                sourcePrice = otherMarketPriceData.price;
+                destPrice = item.price;
+            } else if (destination === 'Steam') {
+                otherMarketPriceData = await getSteamPrice(item.name, 'cs2');
+                sourcePrice = item.price;
+                destPrice = otherMarketPriceData.price;
+            }
+            
+            if (otherMarketPriceData.price === 0) {
+                console.log(`[FILTER] Skipping '${item.name}' because destination price could not be found (Reason: ${otherMarketPriceData.reason}).`);
+                continue; // Переходимо до наступного предмету
+            }
+
+            let fees = 0;
+            if (destination === 'DMarket') fees = destPrice * 0.07;
+            else if (destination === 'Steam') fees = destPrice * 0.15;
+            else if (destination === 'Skinport') fees = destPrice * 0.12;
+            
+            opportunities.push({
+                id: item.id,
+                name: item.name,
+                image: item.image,
+                sourceMarket: source,
+                sourcePrice: sourcePrice,
+                destMarket: destination,
+                destPrice: destPrice,
+                fees: fees
+            });
         }
         
         console.log(`[RESULT] Found ${opportunities.length} total pairs for ${source} -> ${destination}. Sending to client.`);
