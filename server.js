@@ -69,7 +69,7 @@ function buildImageUrl(iconUrl) {
   return 'https://steamcommunity-a.akamaihd.net/economy/image/' + iconUrl;
 }
 
-// --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З API ---
+// --- ІНТЕГРОВАНО: ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З API ---
 
 async function dmarketRequest(method, fullUrl) {
     if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY) {
@@ -117,7 +117,7 @@ async function getSteamPrice(itemName, game) {
     }
 }
 
-// --- НОВИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
+// --- ІНТЕГРОВАНО: НОВИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
     const { source, destination, gameId = 'a8db', limit = 50, currency = 'USD' } = req.query;
 
@@ -182,31 +182,8 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
     }
 });
 
-
 // --- ІСНУЮЧІ МАРШРУТИ (БЕЗ ЗМІН) ---
 
-// Маршрут-проксі для DMarket API (залишаємо для можливого прямого використання)
-app.get('/api/dmarket-proxy', async (req, res) => {
-    if (!DMARKET_PUBLIC_KEY || !DMARKET_SECRET_KEY) {
-        return res.status(500).json({ error: 'DMarket API keys are not configured on the server.' });
-    }
-    const DMARKET_API_BASE = "https://api.dmarket.com";
-    const { path, ...queryParams } = req.query;
-    if (!path) {
-        return res.status(400).json({ error: 'API path is required' });
-    }
-    const url = new URL(`${DMARKET_API_BASE}${path}`);
-    Object.keys(queryParams).forEach(key => url.searchParams.append(key, queryParams[key]));
-    try {
-        const data = await dmarketRequest('GET', url.toString());
-        res.status(200).json(data);
-    } catch (error) {
-        console.error('[DMarket Proxy] Internal error:', error);
-        res.status(500).json({ error: 'Failed to fetch from DMarket API' });
-    }
-});
-
-// API для інвестицій
 app.get('/api/investments', async (req, res) => {
   try {
     const investmentsRef = db.collection('investments');
@@ -253,7 +230,6 @@ app.delete('/api/investments/:id', async (req, res) => {
   }
 });
 
-// API для курсів валют
 app.get('/api/exchange-rates', async (req, res) => {
   const apiKey = process.env.EXCHANGERATE_API_KEY;
   if (!apiKey) {
@@ -275,7 +251,6 @@ app.get('/api/exchange-rates', async (req, res) => {
   }
 });
 
-// Steam API Proxy
 app.get('/search', async (req, res) => {
   const { query, game } = req.query;
   const appId = APP_IDS[game.toLowerCase()];
