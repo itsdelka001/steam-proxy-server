@@ -10,7 +10,6 @@ const port = process.env.PORT || 3001;
 const DMARKET_PUBLIC_KEY = process.env.DMARKET_PUBLIC_KEY;
 const DMARKET_SECRET_KEY = process.env.DMARKET_SECRET_KEY;
 const STEAM_API_KEY = process.env.STEAM_API_KEY;
-// --- ІНТЕГРАЦІЯ SKINPORT: Зчитуємо ключі ---
 const SKINPORT_CLIENT_ID = process.env.SKINPORT_CLIENT_ID;
 const SKINPORT_CLIENT_SECRET = process.env.SKINPORT_CLIENT_SECRET;
 
@@ -100,7 +99,7 @@ async function getSteamPrice(itemName, game) {
     
     const url = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(itemName)}`;
     try {
-        await new Promise(resolve => setTimeout(resolve, 300)); // Затримка для уникнення rate limit
+        await new Promise(resolve => setTimeout(resolve, 300));
         const response = await fetch(url, { headers: defaultHeaders });
         if (!response.ok) return { price: 0 };
         const data = await response.json();
@@ -115,14 +114,15 @@ async function getSteamPrice(itemName, game) {
     }
 }
 
-// --- ІНТЕГРАЦІЯ SKINPORT: Допоміжна функція для запитів до Skinport API ---
+// --- ІНТЕГРОВАНО ВИПРАВЛЕННЯ: Додано заголовок 'Accept-Encoding' ---
 async function skinportRequest(url) {
     if (!SKINPORT_CLIENT_ID || !SKINPORT_CLIENT_SECRET) {
         throw new Error('Skinport API keys are not configured.');
     }
     const response = await fetch(url, {
         headers: {
-            'Authorization': 'Basic ' + Buffer.from(SKINPORT_CLIENT_ID + ':' + SKINPORT_CLIENT_SECRET).toString('base64')
+            'Authorization': 'Basic ' + Buffer.from(SKINPORT_CLIENT_ID + ':' + SKINPORT_CLIENT_SECRET).toString('base64'),
+            'Accept-Encoding': 'gzip, deflate, br' // Цей заголовок виправляє помилку 406
         }
     });
     if (!response.ok) {
@@ -135,12 +135,11 @@ async function skinportRequest(url) {
 
 // --- ОНОВЛЕНИЙ УНІВЕРСАЛЬНИЙ МАРШРУТ ДЛЯ АРБІТРАЖУ ---
 app.get('/api/arbitrage-opportunities', async (req, res) => {
-    // Збільшуємо ліміт для кращої вибірки
-    const { source, destination, gameId = 'a8db', limit = 100, currency = 'USD' } = req.query;
+    // ІНТЕГРОВАНО: Приймаємо ліміт з фронтенду, за замовчуванням 200
+    const { source, destination, gameId = 'a8db', limit = 200, currency = 'USD' } = req.query;
 
     try {
         let opportunities = [];
-        // --- Сценарій 1: Steam -> DMarket ---
         if (source === 'Steam' && destination === 'DMarket') {
             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}&orderBy=price&orderDir=asc`;
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
@@ -152,12 +151,12 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                     const steamPriceData = await getSteamPrice(item.title, 'cs2');
                     const destPrice = parseFloat(item.price[currency]) / 100;
                     const sourcePrice = steamPriceData.price;
-                    if (sourcePrice === 0 || destPrice <= sourcePrice) return null;
+                    // ІНТЕГРОВАНО: Забираємо фільтр, щоб бачити більше варіантів
+                    if (sourcePrice === 0) return null;
                     return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'Steam', sourcePrice, destMarket: 'DMarket', destPrice, fees: destPrice * 0.07 };
                 })
             );
             opportunities = items.filter(op => op !== null);
-        // --- Сценарій 2: DMarket -> Steam ---
         } else if (source === 'DMarket' && destination === 'Steam') {
             const dmarketUrl = `https://api.dmarket.com/exchange/v1/market/items?gameId=${gameId}&limit=${limit}&currency=${currency}&orderBy=price&orderDir=asc`;
             const dmarketResponse = await dmarketRequest('GET', dmarketUrl);
@@ -168,24 +167,23 @@ app.get('/api/arbitrage-opportunities', async (req, res) => {
                     const steamPriceData = await getSteamPrice(item.title, 'cs2');
                     const sourcePrice = parseFloat(item.price[currency]) / 100;
                     const destPrice = steamPriceData.price;
-                    if (destPrice === 0 || sourcePrice >= destPrice) return null;
+                    if (destPrice === 0) return null;
                     return { id: item.itemId, name: item.title, image: item.image, sourceMarket: 'DMarket', sourcePrice, destMarket: 'Steam', destPrice, fees: destPrice * 0.15 };
                 })
             );
             opportunities = items.filter(op => op !== null);
-        // --- ІНТЕГРАЦІЯ SKINPORT: Сценарій 3: Steam -> Skinport ---
         } else if (source === 'Steam' && destination === 'Skinport') {
-            const skinportUrl = `https://api.skinport.com/v1/items?app_id=730&currency=USD&sort=price&order=asc&limit=${limit}`;
+            const skinportUrl = `https://api.skinport.com/v1/items?app_id=730&currency=USD&sort=price&order=asc&limit=${limit > 100 ? 100 : limit}`; // Skinport має макс. ліміт 100
             const skinportResponse = await skinportRequest(skinportUrl);
             if (!skinportResponse || skinportResponse.length === 0) return res.json([]);
 
             const items = await Promise.all(
                 skinportResponse.map(async (item) => {
                     const steamPriceData = await getSteamPrice(item.market_hash_name, 'cs2');
-                    const destPrice = item.suggested_price / 100; // Skinport ціни в центах
+                    const destPrice = item.suggested_price / 100;
                     const sourcePrice = steamPriceData.price;
-                    if (sourcePrice === 0 || destPrice <= sourcePrice) return null;
-                    return { id: item.item_id, name: item.market_hash_name, image: item.image_url, sourceMarket: 'Steam', sourcePrice, destMarket: 'Skinport', destPrice, fees: destPrice * 0.12 }; // Комісія Skinport 12%
+                    if (sourcePrice === 0) return null;
+                    return { id: item.item_id, name: item.market_hash_name, image: item.image_url, sourceMarket: 'Steam', sourcePrice, destMarket: 'Skinport', destPrice, fees: destPrice * 0.12 };
                 })
             );
             opportunities = items.filter(op => op !== null);
